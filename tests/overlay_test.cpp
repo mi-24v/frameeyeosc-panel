@@ -60,9 +60,20 @@ int main(){try{
     keyboard_runtime.fail_keyboard=false;keyboard_runtime.click(30,Ui::rows_top+Ui::row_height+5);CHECK(overlay.step(keyboard_model,"Backend running",send));
     auto old_token=keyboard_runtime.token;keyboard_runtime.typed="/First";keyboard_runtime.done();CHECK(overlay.step(keyboard_model,"Backend running",send));
     keyboard_runtime.click(30,Ui::rows_top+Ui::row_height+5);CHECK(overlay.step(keyboard_model,"Backend running",send));
-    vr::VREvent_t stale_close{};stale_close.eventType=vr::VREvent_KeyboardClosed_Global;stale_close.data.keyboard.overlayHandle=10;stale_close.data.keyboard.uUserValue=old_token;keyboard_runtime.system.push_back(stale_close);
+    vr::VREvent_t stale_close{};stale_close.eventType=vr::VREvent_KeyboardClosed_Global;stale_close.data.keyboard.overlayHandle=10;stale_close.data.keyboard.uUserValue=old_token;keyboard_runtime.system.push_front(stale_close);
     keyboard_runtime.typed="/Second";keyboard_runtime.done();CHECK(overlay.step(keyboard_model,"Backend running",send));CHECK(overlay.ui.patch(keyboard_model)["prefix"]=="/Second");
   }
+  FakeRuntime cancelled;Model cancel_model;cancel_model.expect("s1","state.get",Json::object());cancel_model.receive(response);
+  {Overlay overlay(cancelled);overlay.init();
+    cancelled.click(30,Ui::rows_top+5);CHECK(overlay.step(cancel_model,"Backend running",send));
+    vr::VREvent_t opened{};opened.eventType=vr::VREvent_KeyboardOpened_Global;opened.data.keyboard.overlayHandle=10;cancelled.system.push_back(opened);
+    vr::VREvent_t closed{};closed.eventType=vr::VREvent_KeyboardClosed_Global;closed.data.keyboard.overlayHandle=10;closed.data.keyboard.uUserValue=0;cancelled.system.push_back(closed);
+    CHECK(overlay.step(cancel_model,"Backend running",send));
+    cancelled.click(30,Ui::rows_top+Ui::row_height+5);CHECK(overlay.step(cancel_model,"Backend running",send));CHECK(cancelled.initial=="/FT");
+    cancelled.click(30,Ui::height-20);CHECK(!overlay.step(cancel_model,"Backend running",send));CHECK(cancelled.hides>=1);
+  }
+  FakeRuntime direct_close;
+  {Overlay overlay(direct_close);overlay.init();direct_close.click(30,Ui::height-20);CHECK(!overlay.step(cancel_model,"Backend running",send));}
   // Case preservation must be visible in the actual bitmap, not only model storage.
   Ui ui;Model lower=model;lower.state["settings"]["current"]["prefix"]="/ft";
   CHECK(ui.render(model,"Backend running")!=ui.render(lower,"Backend running"));

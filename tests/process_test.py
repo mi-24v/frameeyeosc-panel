@@ -80,6 +80,11 @@ class Processes(unittest.TestCase):
         p.stdin.write("localquit\n");p.stdin.flush()
         out,err=p.communicate(timeout=5);self.assertEqual(p.returncode,0,err+out)
         self.assertFalse(Path(f"/proc/{pid}").exists())
+    def test_ui_close_stops_owned_child(self):
+        p=self.launch();pid=self.ready(p)
+        p.stdin.write("uiclose\n");p.stdin.flush()
+        out,err=p.communicate(timeout=5);self.assertEqual(p.returncode,0,err+out)
+        self.assertFalse(Path(f"/proc/{pid}").exists())
     def test_exec_failure(self):
         p=subprocess.run([DRIVER,"lifecycle","/missing/backend",self.sock],capture_output=True,text=True,timeout=5)
         self.assertEqual(p.returncode,1);self.assertIn("exec",p.stdout);self.assertNotIn("PID ",p.stdout)

@@ -41,6 +41,7 @@ class Overlay {
   vr::VROverlayHandle_t handle_=0,thumbnail_=0;
   std::string keyboard_key_,last_main_,last_thumb_;
   uint64_t keyboard_token_=0;
+  bool keyboard_opened_=false;
 public:
   Overlay();
   explicit Overlay(OverlayRuntime& runtime):runtime_(&runtime){}

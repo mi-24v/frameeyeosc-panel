@@ -206,19 +206,30 @@ bool Overlay::step(Model& model,const std::string& backend,const std::function<b
     if(ends_session(e.eventType,origin,own_queue?handle_:queue_handle,handle_)) {if(e.eventType==vr::VREvent_Quit)runtime_->acknowledge_quit();return false;}
     if(e.eventType==vr::VREvent_KeyboardDone && !keyboard_key_.empty() && e.data.keyboard.overlayHandle==handle_ && e.data.keyboard.uUserValue==keyboard_token_) {
       try{ui.edit(keyboard_key_,runtime_->keyboard_text(),model);}catch(const std::exception& error){ui.error=error.what();}
-      keyboard_key_.clear();runtime_->hide_keyboard();
+      keyboard_key_.clear();keyboard_opened_=false;runtime_->hide_keyboard();
     }
-    if((e.eventType==vr::VREvent_KeyboardClosed || e.eventType==vr::VREvent_KeyboardClosed_Global) && e.data.keyboard.overlayHandle==handle_ && e.data.keyboard.uUserValue==keyboard_token_)keyboard_key_.clear();
-    if(e.eventType==vr::VREvent_MouseButtonDown && own_queue && queue_handle==handle_ && e.data.mouse.button==vr::VRMouseButton_Left && keyboard_key_.empty()) {
+    // Global open/close notifications guarantee the overlay handle, not a token.
+    // A close preceding this request's Opened notification belongs to an older keyboard.
+    if(e.eventType==vr::VREvent_KeyboardOpened_Global && e.data.keyboard.overlayHandle==handle_ && !keyboard_key_.empty())keyboard_opened_=true;
+    if(((e.eventType==vr::VREvent_KeyboardClosed_Global && e.data.keyboard.overlayHandle==handle_) || (e.eventType==vr::VREvent_KeyboardClosed && own_queue && queue_handle==handle_)) && keyboard_opened_) {
+      keyboard_key_.clear();keyboard_opened_=false;
+    }
+    if(e.eventType==vr::VREvent_MouseButtonDown && own_queue && queue_handle==handle_ && e.data.mouse.button==vr::VRMouseButton_Left) {
       // SDK mouse origin is bottom-left; the CPU canvas uses top-left.
-      const auto action=ui.click(e.data.mouse.x,Ui::height-e.data.mouse.y,model);
-      if(action=="close")return false;
+      const float x=e.data.mouse.x,y=Ui::height-e.data.mouse.y;
+      const bool close_hit=std::isfinite(x)&&std::isfinite(y)&&x>=0&&x<250&&y>=Ui::height-55&&y<Ui::height;
+      if(!keyboard_key_.empty() && !close_hit)return true;
+      const auto action=ui.click(x,y,model);
+      if(action=="close") {
+        if(!keyboard_key_.empty())runtime_->hide_keyboard();
+        keyboard_key_.clear();keyboard_opened_=false;return false;
+      }
       if(action=="apply") {
         if(!submit(ui.patch(model),ui.save))ui.error="No changes queued; confirm connection and changed values";
       } else if(action!="" && action!="changed" && action!="save") {
         const auto token=++keyboard_token_;
         auto error=runtime_->keyboard(handle_,action,ui.value(action,model),token);
-        if(error.empty())keyboard_key_=action;
+        if(error.empty()){keyboard_key_=action;keyboard_opened_=false;}
         else ui.error="Keyboard failed: "+error;
       }
     }

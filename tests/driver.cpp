@@ -69,6 +69,7 @@ int main(int argc, char** argv) {
         if(command=="hide")event.eventType=vr::VREvent_OverlayHidden;
         else if(command=="remotequit")event.eventType=vr::VREvent_ProcessQuit;
         else if(command=="localquit")event.eventType=vr::VREvent_Quit;
+        else if(command=="uiclose") {event.eventType=vr::VREvent_MouseButtonDown;event.data.mouse={30,20,vr::VRMouseButton_Left,0};}
         else if(command=="close")event.eventType=vr::VREvent_OverlayClosed;
         else return 6;
         runtime.events.push_back(event);
