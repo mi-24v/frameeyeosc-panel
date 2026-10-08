@@ -42,6 +42,10 @@ int main() { try {
   save_model.state["settings"]["current"]["eyelid_output_cap"]=0.6; // confirmed save:false result
   CHECK(save_ui.patch(save_model).empty());
   save_ui.save=true;CHECK((save_ui.patch(save_model)==Json{{"eyelid_output_cap",0.6}}));
+  for(const auto& point:std::vector<std::pair<float,float>>{{950,Ui::height-20},{959,Ui::height-20},{1424,Ui::height-20},{1439,Ui::height-20},{1050,Ui::height-10},{1050,Ui::height-1}}) {
+    CHECK(save_ui.click(point.first,point.second,save_model).empty());
+    CHECK((save_ui.patch(save_model)==Json{{"eyelid_output_cap",0.6}}));
+  }
   save_ui.save=false;
   CHECK(save_ui.click(1050,Ui::height-20,save_model)=="discard");
   CHECK(save_model.state["settings"]["current"]["eyelid_output_cap"]==0.6);
