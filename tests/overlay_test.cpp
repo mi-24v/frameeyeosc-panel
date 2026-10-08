@@ -73,6 +73,9 @@ int main(){try{
     vr::VREvent_t closed{};closed.eventType=vr::VREvent_KeyboardClosed_Global;closed.data.keyboard.overlayHandle=10;closed.data.keyboard.uUserValue=0;cancelled.system.push_back(closed);
     CHECK(overlay.step(cancel_model,"Backend running",send));
     cancelled.click(30,Ui::rows_top+Ui::row_height+5);CHECK(overlay.step(cancel_model,"Backend running",send));CHECK(cancelled.initial=="/FT");
+    for(const auto& point:std::vector<std::pair<float,float>>{{5,Ui::height-20},{15,Ui::height-20},{244,Ui::height-20},{249,Ui::height-20},{100,Ui::height-10},{100,Ui::height-1}}) {
+      cancelled.click(point.first,point.second);CHECK(overlay.step(cancel_model,"Backend running",send));CHECK(cancelled.hides==0);
+    }
     cancelled.click(30,Ui::height-20);CHECK(!overlay.step(cancel_model,"Backend running",send));CHECK(cancelled.hides>=1);
   }
   FakeRuntime direct_close;

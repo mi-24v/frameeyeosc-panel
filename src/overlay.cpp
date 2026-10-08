@@ -122,7 +122,15 @@ std::string Ui::value(const std::string& key,const Model& m) const {
 }
 std::string Ui::click(float x,float y,const Model& m) {
   if(!std::isfinite(x)||!std::isfinite(y)||x<0||x>=width||y<0||y>=height)return "";
-  if(y>=height-55) {if(x<250)return "close";if(m.pending()||!m.fresh)return "";if(x<590){save=!save;return "save";} if(x<950)return "apply";if(x>=960&&x<1424&&y<height-10){draft_.clear();error.clear();++revision_;return "discard";}return "";}
+  if(y>=height-55) {
+    if(y>=height-10)return "";
+    if(x>=16&&x<244)return "close";
+    if(m.pending()||!m.fresh)return "";
+    if(x>=260&&x<580){save=!save;return "save";}
+    if(x>=595&&x<935)return "apply";
+    if(x>=960&&x<1424){draft_.clear();error.clear();++revision_;return "discard";}
+    return "";
+  }
   if(m.pending()||!m.fresh)return "";
   if(y>=rows_top && y<rows_top+row_height*static_cast<int>(fields.size())) {
     const auto key=fields[static_cast<size_t>((y-rows_top)/row_height)];
@@ -246,7 +254,7 @@ bool Overlay::step(Model& model,const std::string& backend,const std::function<b
     if(e.eventType==vr::VREvent_MouseButtonDown && own_queue && queue_handle==handle_ && e.data.mouse.button==vr::VRMouseButton_Left) {
       // SDK mouse origin is bottom-left; the CPU canvas uses top-left.
       const float x=e.data.mouse.x,y=Ui::height-e.data.mouse.y;
-      const bool close_hit=std::isfinite(x)&&std::isfinite(y)&&x>=0&&x<250&&y>=Ui::height-55&&y<Ui::height;
+      const bool close_hit=std::isfinite(x)&&std::isfinite(y)&&x>=16&&x<244&&y>=Ui::height-55&&y<Ui::height-10;
       if(!keyboard_key_.empty() && !close_hit)return true;
       const auto action=ui.click(x,y,model);
       if(action=="close") {
