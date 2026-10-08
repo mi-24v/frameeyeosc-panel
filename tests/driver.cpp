@@ -17,7 +17,7 @@ struct DriverRuntime:OverlayRuntime {
     event=events.front();events.pop_front();return true;
   }
   bool visible(vr::VROverlayHandle_t)override{return false;}
-  void raw(vr::VROverlayHandle_t,const std::vector<unsigned char>&)override{}
+  void raw(vr::VROverlayHandle_t,const std::vector<unsigned char>&,int,int)override{}
   std::string keyboard(vr::VROverlayHandle_t,const std::string&,const std::string&,uint64_t)override{return "unavailable";}
   std::string keyboard_text()override{return "";}
   void hide_keyboard()override{}

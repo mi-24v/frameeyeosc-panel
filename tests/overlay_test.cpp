@@ -3,11 +3,14 @@
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <thread>
+#include <chrono>
 using namespace panel;
 #define CHECK(x) do{if(!(x))throw std::runtime_error(#x);}while(0)
 struct FakeRuntime:OverlayRuntime {
-  bool shown=false,fail_keyboard=false;
-  unsigned renders=0,shutdowns=0,acknowledgments=0,hides=0;
+  bool shown=false,thumb_shown=false,fail_keyboard=false;
+  unsigned renders=0,main_uploads=0,thumb_uploads=0,shutdowns=0,acknowledgments=0,hides=0;
+  size_t thumb_bytes=0;
   uint64_t token=0;
   std::string typed,initial;
   std::deque<vr::VREvent_t> system,overlay,thumbnail;
@@ -16,8 +19,8 @@ struct FakeRuntime:OverlayRuntime {
   bool poll(EventOrigin origin,vr::VROverlayHandle_t handle,vr::VREvent_t& e)override{
     auto& queue=origin==EventOrigin::System?system:handle==11?thumbnail:overlay;if(queue.empty())return false;e=queue.front();queue.pop_front();return true;
   }
-  bool visible(vr::VROverlayHandle_t handle)override{return shown && handle==10;}
-  void raw(vr::VROverlayHandle_t,const std::vector<unsigned char>& bytes)override{CHECK(bytes.size()==Ui::width*Ui::height*4);++renders;}
+  bool visible(vr::VROverlayHandle_t handle)override{return (shown && handle==10)||(thumb_shown && handle==11);}
+  void raw(vr::VROverlayHandle_t handle,const std::vector<unsigned char>& bytes,int width,int height)override{CHECK(bytes.size()==static_cast<size_t>(width)*height*4);++renders;if(handle==10)++main_uploads;else{++thumb_uploads;thumb_bytes=bytes.size();}}
   std::string keyboard(vr::VROverlayHandle_t,const std::string&,const std::string& existing,uint64_t value)override{initial=existing;token=value;return fail_keyboard?"unavailable":"";}
   std::string keyboard_text()override{return typed;}
   void hide_keyboard()override{++hides;}
@@ -79,6 +82,21 @@ int main(){try{
     submission.click(650,Ui::height-20);
     auto refused=[&](const Json&,bool){submission_model.disconnected("Reconnecting at request limit; apply again after synchronization");return false;};
     CHECK(overlay.step(submission_model,"Backend running",refused));CHECK(overlay.ui.error.empty());CHECK(submission_model.status.find("Reconnecting at request limit")!=std::string::npos);
+  }
+  FakeRuntime images;images.shown=true;Model image_model;image_model.expect("s1","state.get",Json::object());image_model.receive(response);
+  {Overlay overlay(images);overlay.init();auto no_send=[](const Json&,bool){return false;};
+    CHECK(overlay.step(image_model,"Backend running",no_send));CHECK(images.main_uploads==1);
+    images.emit(vr::VREvent_ImageFailed,EventOrigin::OwnedOverlay);images.shown=false;
+    CHECK(overlay.step(image_model,"Backend running",no_send));CHECK(images.main_uploads==1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(260));images.shown=true;
+    CHECK(overlay.step(image_model,"Backend running",no_send));CHECK(images.main_uploads==2);
+    images.emit(vr::VREvent_ImageFailed,EventOrigin::OwnedOverlay);CHECK(overlay.step(image_model,"Backend running",no_send));
+    std::this_thread::sleep_for(std::chrono::milliseconds(260));CHECK(overlay.step(image_model,"Backend running",no_send));CHECK(images.main_uploads==3);
+    images.emit(vr::VREvent_ImageFailed,EventOrigin::OwnedOverlay);CHECK(overlay.step(image_model,"Backend running",no_send));
+    std::this_thread::sleep_for(std::chrono::milliseconds(260));CHECK(overlay.step(image_model,"Backend running",no_send));CHECK(images.main_uploads==3);
+    images.thumb_shown=true;CHECK(overlay.step(image_model,"Backend running",no_send));CHECK(images.thumb_bytes<1024*1024);
+    vr::VREvent_t failed{};failed.eventType=vr::VREvent_ImageFailed;images.thumbnail.push_back(failed);CHECK(overlay.step(image_model,"Backend running",no_send));
+    std::this_thread::sleep_for(std::chrono::milliseconds(260));CHECK(overlay.step(image_model,"Backend running",no_send));CHECK(images.thumb_uploads==2);
   }
   // Case preservation must be visible in the actual bitmap, not only model storage.
   Ui ui;Model lower=model;lower.state["settings"]["current"]["prefix"]="/ft";

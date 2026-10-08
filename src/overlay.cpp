@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <limits>
 #include <stdexcept>
+#include <iostream>
 namespace panel {
 bool ends_session(uint32_t event,EventOrigin origin,vr::VROverlayHandle_t event_handle,vr::VROverlayHandle_t own_handle) {
   return (event==vr::VREvent_Quit && (origin==EventOrigin::System || event_handle==own_handle)) || (event==vr::VREvent_OverlayClosed && origin==EventOrigin::OwnedOverlay && event_handle==own_handle);
@@ -53,9 +54,11 @@ const std::map<char,std::array<unsigned char,7>> glyphs={
 {'`',{8,4,2,0,0,0,0}}
 };
 struct Canvas {
-  std::vector<unsigned char> bytes=std::vector<unsigned char>(Ui::width*Ui::height*4);
+  int width,height;
+  std::vector<unsigned char> bytes;
+  explicit Canvas(int w=Ui::width,int h=Ui::height):width(w),height(h),bytes(static_cast<size_t>(w)*h*4){}
   void rect(int x,int y,int w,int h,std::array<unsigned char,3> c) {
-    for(int yy=std::max(0,y);yy<std::min(Ui::height,y+h);++yy) for(int xx=std::max(0,x);xx<std::min(Ui::width,x+w);++xx){size_t i=(yy*Ui::width+xx)*4;bytes[i]=c[0];bytes[i+1]=c[1];bytes[i+2]=c[2];bytes[i+3]=255;}
+    for(int yy=std::max(0,y);yy<std::min(height,y+h);++yy) for(int xx=std::max(0,x);xx<std::min(width,x+w);++xx){size_t i=(yy*width+xx)*4;bytes[i]=c[0];bytes[i+1]=c[1];bytes[i+2]=c[2];bytes[i+3]=255;}
   }
   void text(int x,int y,const std::string& text,int scale=2,int max_width=1400,std::array<unsigned char,3> color={220,230,240}) {
     std::string shown=text;
@@ -159,7 +162,7 @@ std::vector<unsigned char> Ui::render(const Model& m,const std::string& backend)
   c.text(24,y+75,"Calibration unavailable in this build",2,1380,{255,190,80});
   c.text(24,y+99,m.status,2,1380);
   c.text(24,y+123,error,2,1380,{255,120,120});
-  c.text(24,y+149,"Drafts apply only after response. Close stops owned backend. Relaunch manually.");
+  c.text(24,y+149,image_status.empty()?"Drafts apply only after response. Close stops owned backend. Relaunch manually.":image_status,2,1380,{255,190,80});
   c.rect(16,height-55,228,45,{110,45,50});c.text(30,height-41,"Close",3);
   c.rect(260,height-55,320,45,{45,65,90});c.text(274,height-41,save?"Save: true":"Save: false",3);
   c.rect(595,height-55,340,45,{40,90,75});c.text(610,height-41,m.pending()?"Pending...":"Apply changes",3);
@@ -190,8 +193,8 @@ public:
     return origin==EventOrigin::System?vr::VRSystem()->PollNextEvent(&e,sizeof(e)):vr::VROverlay()->PollNextOverlayEvent(handle,&e,sizeof(e));
   }
   bool visible(vr::VROverlayHandle_t handle)override{return vr::VROverlay()->IsOverlayVisible(handle);}
-  void raw(vr::VROverlayHandle_t handle,const std::vector<unsigned char>& bytes)override {
-    vrcheck(vr::VROverlay()->SetOverlayRaw(handle,const_cast<unsigned char*>(bytes.data()),Ui::width,Ui::height,4),"SetOverlayRaw");
+  void raw(vr::VROverlayHandle_t handle,const std::vector<unsigned char>& bytes,int width,int height)override {
+    vrcheck(vr::VROverlay()->SetOverlayRaw(handle,const_cast<unsigned char*>(bytes.data()),width,height,4),"SetOverlayRaw");
   }
   std::string keyboard(vr::VROverlayHandle_t handle,const std::string& key,const std::string& existing,uint64_t token)override {
     auto rc=vr::VROverlay()->ShowKeyboardForOverlay(handle,vr::k_EGamepadTextInputModeNormal,vr::k_EGamepadTextInputLineModeSingleLine,vr::KeyboardFlag_Modal,key.c_str(),1024,existing.c_str(),token);
@@ -213,9 +216,22 @@ bool Overlay::step(IpcClient& ipc,OwnedChild& child) {
   return step(ipc.model,child.reason(),[&](const Json& patch,bool save){return ipc.patch(patch,save);});
 }
 bool Overlay::step(Model& model,const std::string& backend,const std::function<bool(const Json&,bool)>& submit) {
+  auto failed_image=[&](vr::VROverlayHandle_t handle,const std::string& detail) {
+    auto& image=handle==handle_?main_image_:thumb_image_;
+    image.signature.clear();image.retry_after=std::chrono::steady_clock::now()+std::chrono::milliseconds(250);
+    if(image.failures<3) {
+      ++image.failures;
+      image.error=(handle==handle_?"Dashboard":"Thumbnail")+std::string(" image failed: ")+detail+(image.failures>=3?"; retries exhausted; relaunch manually":"; retry pending");
+      std::cerr<<image.error<<"\n";
+    }
+  };
   auto event=[&](const vr::VREvent_t& e,EventOrigin origin,vr::VROverlayHandle_t queue_handle)->bool {
     const bool own_queue=origin==EventOrigin::OwnedOverlay && (queue_handle==handle_ || queue_handle==thumbnail_);
     if(ends_session(e.eventType,origin,own_queue?handle_:queue_handle,handle_)) {if(e.eventType==vr::VREvent_Quit)runtime_->acknowledge_quit();return false;}
+    if(own_queue && e.eventType==vr::VREvent_ImageFailed)failed_image(queue_handle,"SDK ImageFailed");
+    if(own_queue && e.eventType==vr::VREvent_ImageLoaded) {
+      auto& image=queue_handle==handle_?main_image_:thumb_image_;image.failures=0;image.error.clear();
+    }
     if(e.eventType==vr::VREvent_KeyboardDone && !keyboard_key_.empty() && e.data.keyboard.overlayHandle==handle_ && e.data.keyboard.uUserValue==keyboard_token_) {
       try{ui.edit(keyboard_key_,runtime_->keyboard_text(),model);}catch(const std::exception& error){ui.error=error.what();}
       keyboard_key_.clear();keyboard_opened_=false;runtime_->hide_keyboard();
@@ -255,13 +271,22 @@ bool Overlay::step(Model& model,const std::string& backend,const std::function<b
   for(unsigned i=0;i<64 && runtime_->poll(EventOrigin::OwnedOverlay,thumbnail_,e);++i)if(!event(e,EventOrigin::OwnedOverlay,thumbnail_))return false;
   // No optimistic draft clearing: clear only values now confirmed by the backend.
   ui.confirmed(model);
-  const std::string signature=model.state.dump()+model.status+backend+ui.patch(model).dump()+ui.error+(ui.save?"save":"nosave")+(model.fresh?"fresh":"stale");
-  if(runtime_->visible(handle_) && signature!=last_main_) {
-    auto bytes=ui.render(model,backend);runtime_->raw(handle_,bytes);last_main_=signature;
+  ui.image_status=main_image_.error;
+  if(!thumb_image_.error.empty())ui.image_status+=(ui.image_status.empty()?"":"; ")+thumb_image_.error;
+  const auto now=std::chrono::steady_clock::now();
+  if(runtime_->visible(handle_) && main_image_.failures<3 && now>=main_image_.retry_after) {
+    const std::string signature=model.state.dump()+model.status+backend+ui.patch(model).dump()+ui.error+ui.image_status+(ui.save?"save":"nosave")+(model.fresh?"fresh":"stale");
+    if(signature!=main_image_.signature) {
+      auto bytes=ui.render(model,backend);
+      try{runtime_->raw(handle_,bytes,Ui::width,Ui::height);main_image_.signature=signature;}
+      catch(const std::exception& error){failed_image(handle_,error.what());}
+    }
   }
-  if(runtime_->visible(thumbnail_) && last_thumb_.empty()) {
-    Canvas c;c.rect(0,0,Ui::width,Ui::height,{25,60,85});c.text(200,400,"FrameEyeOSC",12);
-    runtime_->raw(thumbnail_,c.bytes);last_thumb_="shown";
+  if(runtime_->visible(thumbnail_) && thumb_image_.signature.empty() && thumb_image_.failures<3 && now>=thumb_image_.retry_after) {
+    constexpr int width=256,height=128;
+    Canvas c(width,height);c.rect(0,0,width,height,{25,60,85});c.text(25,50,"FrameEyeOSC",3,230);
+    try{runtime_->raw(thumbnail_,c.bytes,width,height);thumb_image_.signature="shown";}
+    catch(const std::exception& error){failed_image(thumbnail_,error.what());}
   }
   return true;
 }
