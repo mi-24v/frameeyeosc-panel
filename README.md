@@ -81,11 +81,14 @@ response/event LF-terminated lines are limited to 1 MiB (the backend output queu
 bound). Valid snapshots can exceed 64 KiB when current and saved values repeat
 a long string. There is a 16 KiB read budget
 and at most eight parsed messages per tick, and one pending request/output
-line. Invalid JSON/UTF-8, duplicate keys, excessive nesting and overlong lines
+line. Invalid JSON/UTF-8, non-finite numbers, duplicate keys, excessive nesting
+and overlong lines
 disconnect. A response timeout is three seconds; reconnect retries are spaced
 by 250 ms. Every reconnect first requests `state.get`. Unconfirmed patches are
 never automatically resent. A `request_limit` response triggers a reconnect and
 `state.get`; its unapplied draft requires a manual Apply after synchronization.
+An error response to `state.get` also reconnects and retries `state.get` only,
+with 250 ms reconnect spacing while it fails.
 Last confirmed values are visibly **STALE** on
 connection loss. OS/exec/filesystem operations have no hard real-time guarantee.
 
@@ -112,7 +115,9 @@ the keyboard is open. A keyboard-open failure is shown.
 Toggle **Save**, then **Apply changes** to send only selected fields. A Save:false
 trial retains selected unsaved drafts, so Save:true can persist them even when
 they already match current values. Explicitly editing a current value also
-selects that field for saving; unrelated CLI/current fields are not saved. Edits and
+selects that field for saving; unrelated CLI/current fields are not saved.
+Use **Discard drafts** to clear all selected edits before saving another field;
+this leaves backend current/saved values unchanged. Edits and
 Apply are disabled while awaiting a backend response. Current values do not
 change optimistically. Failures retain the backend's actual state and display
 its error; failed drafts can be corrected. Saved fields update only after a
