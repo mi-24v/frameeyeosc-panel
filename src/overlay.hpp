@@ -10,6 +10,7 @@ enum class EventOrigin {System, OwnedOverlay};
 bool ends_session(uint32_t event,EventOrigin origin,vr::VROverlayHandle_t event_handle,vr::VROverlayHandle_t own_handle);
 class Ui {
   std::map<std::string,Json> draft_;
+  uint64_t revision_=0;
 public:
   static constexpr int width=1440,height=1080,rows_top=130,row_height=65;
   static const std::vector<std::string> fields;
@@ -20,6 +21,7 @@ public:
   std::string value(const std::string& key,const Model& model) const;
   std::string click(float x,float y,const Model& model);
   void confirmed(const Model& model);
+  uint64_t revision() const{return revision_;}
   std::vector<unsigned char> render(const Model& model,const std::string& backend) const;
 };
 class OverlayRuntime {

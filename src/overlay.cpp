@@ -97,7 +97,7 @@ bool Ui::edit(const std::string& key,const std::string& text,const Model& m) {
     if(!std::isfinite(number) || (key=="target_port" && (!value.is_number_integer()||number<1||number>65535)) || (key=="eyelid_output_cap" && (number<0||number>1)) || (key=="one_euro_beta" && number<0) || ((key=="one_euro_min_cutoff"||key=="one_euro_d_cutoff") && (number<=0 || number>std::numeric_limits<float>::max() || static_cast<float>(number)==0))) {error="Out of range: cap 0..1; port integer 1..65535; cutoff >0; beta >=0";return false;}
     if(key!="target_port") value=number;
   }
-  draft_[key]=value;return true;
+  draft_[key]=value;++revision_;return true;
 }
 Json Ui::patch(const Model& m) const {
   Json result=Json::object();const auto applied=current(m);
@@ -112,7 +112,7 @@ void Ui::confirmed(const Model& m) {
   const auto applied=current(m);
   const Json saved=m.state.contains("settings")?m.state["settings"].value("saved",Json::object()):Json::object();
   for(auto it=draft_.begin();it!=draft_.end();) {
-    if(applied.contains(it->first)&&applied[it->first]==it->second&&saved.contains(it->first)&&saved[it->first]==it->second)it=draft_.erase(it);
+    if(applied.contains(it->first)&&applied[it->first]==it->second&&saved.contains(it->first)&&saved[it->first]==it->second){it=draft_.erase(it);++revision_;}
     else ++it;
   }
 }
@@ -122,7 +122,7 @@ std::string Ui::value(const std::string& key,const Model& m) const {
 }
 std::string Ui::click(float x,float y,const Model& m) {
   if(!std::isfinite(x)||!std::isfinite(y)||x<0||x>=width||y<0||y>=height)return "";
-  if(y>=height-55) {if(x<250)return "close";if(m.pending()||!m.fresh)return "";if(x<590){save=!save;return "save";} if(x<950)return "apply";return "";}
+  if(y>=height-55) {if(x<250)return "close";if(m.pending()||!m.fresh)return "";if(x<590){save=!save;return "save";} if(x<950)return "apply";draft_.clear();error.clear();++revision_;return "discard";}
   if(m.pending()||!m.fresh)return "";
   if(y>=rows_top && y<rows_top+row_height*static_cast<int>(fields.size())) {
     const auto key=fields[static_cast<size_t>((y-rows_top)/row_height)];
@@ -166,6 +166,7 @@ std::vector<unsigned char> Ui::render(const Model& m,const std::string& backend)
   c.rect(16,height-55,228,45,{110,45,50});c.text(30,height-41,"Close",3);
   c.rect(260,height-55,320,45,{45,65,90});c.text(274,height-41,save?"Save: true":"Save: false",3);
   c.rect(595,height-55,340,45,{40,90,75});c.text(610,height-41,m.pending()?"Pending...":"Apply changes",3);
+  c.rect(960,height-55,464,45,{75,65,80});c.text(978,height-41,"Discard drafts",3);
   return std::move(c.bytes);
 }
 namespace {
@@ -256,7 +257,7 @@ bool Overlay::step(Model& model,const std::string& backend,const std::function<b
         const auto patch=ui.patch(model);
         if(patch.empty())ui.error="No changed or unsaved selected values";
         else {ui.error.clear();submit(patch,ui.save);} // Failure reason belongs to model.status.
-      } else if(action!="" && action!="changed" && action!="save") {
+      } else if(action!="" && action!="changed" && action!="save" && action!="discard") {
         const auto token=++keyboard_token_;
         auto error=runtime_->keyboard(handle_,action,ui.value(action,model),token);
         if(error.empty()){keyboard_key_=action;keyboard_opened_=false;}
@@ -275,7 +276,7 @@ bool Overlay::step(Model& model,const std::string& backend,const std::function<b
   if(!thumb_image_.error.empty())ui.image_status+=(ui.image_status.empty()?"":"; ")+thumb_image_.error;
   const auto now=std::chrono::steady_clock::now();
   if(runtime_->visible(handle_) && main_image_.failures<3 && now>=main_image_.retry_after) {
-    const std::string signature=model.state.dump()+model.status+backend+ui.patch(model).dump()+ui.error+ui.image_status+(ui.save?"save":"nosave")+(model.fresh?"fresh":"stale");
+    const std::string signature=model.state.dump()+model.status+backend+ui.patch(model).dump()+std::to_string(ui.revision())+ui.error+ui.image_status+(ui.save?"save":"nosave")+(model.fresh?"fresh":"stale");
     if(signature!=main_image_.signature) {
       auto bytes=ui.render(model,backend);
       try{runtime_->raw(handle_,bytes,Ui::width,Ui::height);main_image_.signature=signature;}

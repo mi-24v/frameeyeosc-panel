@@ -42,6 +42,12 @@ int main() { try {
   save_model.state["settings"]["current"]["eyelid_output_cap"]=0.6; // confirmed save:false result
   CHECK(save_ui.patch(save_model).empty());
   save_ui.save=true;CHECK((save_ui.patch(save_model)==Json{{"eyelid_output_cap",0.6}}));
+  save_ui.save=false;
+  CHECK(save_ui.click(1050,Ui::height-20,save_model)=="discard");
+  CHECK(save_model.state["settings"]["current"]["eyelid_output_cap"]==0.6);
+  save_ui.save=true;
+  CHECK(save_ui.edit("prefix","/OnlyPrefix",save_model));
+  CHECK((save_ui.patch(save_model)==Json{{"prefix","/OnlyPrefix"}}));
   Ui cli_ui;CHECK(cli_ui.edit("prefix","/FT",save_model));cli_ui.save=true;
   CHECK((cli_ui.patch(save_model)==Json{{"prefix","/FT"}}));
   auto pixels=ui.render(m,"running"); CHECK(pixels.size()==Ui::width*Ui::height*4);
