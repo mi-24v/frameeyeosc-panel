@@ -52,10 +52,16 @@ config/socket on subsequent launches. `--config` is optional and otherwise
 uses the backend's normal config default. The child gets the same paths plus
 `--panel-mode`; no explicit auto target overrides saved manual settings.
 
+`--backend` must name the backend executable directly, or a wrapper that uses
+`exec` to replace itself with it. A wrapper that forks a separate backend fails
+the PID ownership check.
+
 The child starts **before** `VR_Init`, with prebuilt argv, default/unblocked
 termination signals, Linux parent-death SIGTERM and a parent-PID race recheck.
 An exec status pipe distinguishes failure from successful exec. The panel
-refuses a live preexisting backend. Every initial/reconnected socket must have
+refuses a live preexisting backend on the same control socket. Older IPC-less
+backends and instances using a different socket are not detected; stop those
+manually before starting the panel. No unmanaged process is killed or adopted. Every initial/reconnected socket must have
 `SO_PEERCRED.pid` equal to this owned child and the same UID, before any request
 is sent. A racing foreign peer is rejected; it is never signaled or adopted.
 Stale socket handling and the socket-path lock remain backend responsibilities.
@@ -99,9 +105,14 @@ values stay valid and appear clipped; editing replaces them with a value within
 this keyboard limit. Non-ASCII glyphs currently appear as `?`. Local type/range checks show an error; the backend remains authoritative
 for candidate validation, resource preparation and saving. Snapshot updates
 never overwrite an active draft. Keyboard results are accepted only for this
-overlay and the matching request token. A keyboard-open failure is shown.
+overlay and the matching request token. Global keyboard cancellation uses the
+SDK-owned overlay handle after its opened event; Close remains available while
+the keyboard is open. A keyboard-open failure is shown.
 
-Toggle **Save**, then **Apply changes** to send only changed fields. Edits and
+Toggle **Save**, then **Apply changes** to send only selected fields. A Save:false
+trial retains selected unsaved drafts, so Save:true can persist them even when
+they already match current values. Explicitly editing a current value also
+selects that field for saving; unrelated CLI/current fields are not saved. Edits and
 Apply are disabled while awaiting a backend response. Current values do not
 change optimistically. Failures retain the backend's actual state and display
 its error; failed drafts can be corrected. Saved fields update only after a
@@ -109,7 +120,12 @@ confirmed successful save. Runtime patches may override CLI values; subsequent
 backend launches apply CLI > saved > default precedence again.
 
 The CPU bitmap is submitted with `SetOverlayRaw` only when its overlay is visible
-and its state/UI changes. No OpenGL/UI framework is required. Calibration is
+and its state/UI changes. Owned SDK ImageFailed events invalidate cached images
+and retry while visible at 250 ms intervals, up to three consecutive failures;
+stderr and the dashboard show the failure. Relaunch manually after exhaustion.
+The main bitmap is 1440x1080 RGBA (6,220,800 bytes); its acceptance by an actual
+runtime remains unverified. The separate thumbnail is 256x128 RGBA.
+No OpenGL/UI framework is required. Calibration is
 shown as **Calibration unavailable in this build**. No calibration buttons,
 profiles, widening/margin controls or numeric calibration defaults are supplied.
 
@@ -136,7 +152,15 @@ The generated/installed `share/frameeyeosc-panel/frameeyeosc-panel.vrmanifest`
 uses app key `frameeyeosc.panel`, `is_dashboard_overlay=true`, and both
 `binary_path_linux` and Steam Frame's `binary_path_linux_arm`. Both launch only
 the panel; its arguments identify the backend. Build/install do not register or
-start the application. Relative paths and control characters are rejected.
+start the application. Both PANEL_BACKEND and PANEL_CONTROL_SOCKET must be
+provided together; PANEL_CONFIG is optional. Manifest generation accepts only
+absolute ASCII paths that require no shell quotation (the Python shlex.quote
+result must equal the original path). Spaces, quotes, backslashes, shell
+metacharacters requiring quotation, non-ASCII and control characters are
+rejected because SteamVR argument parsing has not been verified. This applies
+to the installed panel binary path and every backend/socket/config path. Direct
+CLI invocation via actual argv can use other paths; installing without manifest
+options supports such prefixes.
 
 Registration is a separate **manual** action on the target machine with SteamVR
 running. Use the official SDK application APIs, checking each returned error:
