@@ -33,6 +33,14 @@ int main() { try {
   m.receive(lines[4]); CHECK(ui.patch(m)["prefix"]=="/New");
   CHECK(ui.click(20,Ui::rows_top+5,m)=="eyelid_output_cap");
   CHECK(ui.click(20,Ui::height-20,m)=="close");
+  for(size_t row=0;row<Ui::fields.size();++row) {
+    const float top=Ui::rows_top+row*Ui::row_height;const auto before=ui.patch(m);
+    for(const auto& point:std::vector<std::pair<float,float>>{{15,top+5},{Ui::width-16,top+5},{30,top+Ui::row_height-3},{30,top+Ui::row_height-1}}) {
+      CHECK(ui.click(point.first,point.second,m).empty());CHECK(ui.patch(m)==before);
+    }
+  }
+  CHECK(ui.click(16,Ui::rows_top,m)=="eyelid_output_cap");
+  CHECK(ui.click(Ui::width-17,Ui::rows_top+Ui::row_height-4,m)=="eyelid_output_cap");
   const auto draft_before=ui.patch(m);const bool save_before=ui.save;
   for(const auto& point:std::vector<std::pair<float,float>>{{0,Ui::height-20},{15,Ui::height-20},{244,Ui::height-20},{249,Ui::height-20},{250,Ui::height-20},{259,Ui::height-20},{580,Ui::height-20},{589,Ui::height-20},{590,Ui::height-20},{594,Ui::height-20},{935,Ui::height-20},{949,Ui::height-20},{100,Ui::height-10},{100,Ui::height-1},{300,Ui::height-10},{650,Ui::height-1}}) {
     CHECK(ui.click(point.first,point.second,m).empty());CHECK(ui.save==save_before);CHECK(ui.patch(m)==draft_before);

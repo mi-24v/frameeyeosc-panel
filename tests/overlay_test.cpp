@@ -37,6 +37,12 @@ int main(){try{
   {
     Overlay overlay(fake);overlay.init();
     CHECK(overlay.step(model,"Backend running",send));CHECK(fake.renders==0);
+    for(size_t row=0;row<Ui::fields.size();++row) {
+      const float top=Ui::rows_top+row*Ui::row_height;
+      for(const auto& point:std::vector<std::pair<float,float>>{{15,top+5},{Ui::width-16,top+5},{30,top+Ui::row_height-3},{30,top+Ui::row_height-1}}) {
+        fake.click(point.first,point.second);CHECK(overlay.step(model,"Backend running",send));CHECK(fake.token==0);CHECK(overlay.ui.patch(model).empty());
+      }
+    }
     fake.shown=true;CHECK(overlay.step(model,"Backend running",send));CHECK(fake.renders==1);
     CHECK(overlay.step(model,"Backend running",send));CHECK(fake.renders==1);
     fake.shown=false;model.status="hidden changed";CHECK(overlay.step(model,"Backend running",send));CHECK(fake.renders==1);

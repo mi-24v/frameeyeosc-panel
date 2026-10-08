@@ -132,7 +132,8 @@ std::string Ui::click(float x,float y,const Model& m) {
     return "";
   }
   if(m.pending()||!m.fresh)return "";
-  if(y>=rows_top && y<rows_top+row_height*static_cast<int>(fields.size())) {
+  if(x>=16 && x<width-16 && y>=rows_top && y<rows_top+row_height*static_cast<int>(fields.size())) {
+    if(static_cast<int>(y-rows_top)%row_height>=row_height-3)return "";
     const auto key=fields[static_cast<size_t>((y-rows_top)/row_height)];
     if(key=="one_euro") {edit(key,value(key,m)=="true"?"false":"true",m);return "changed";}
     if(key=="target_mode") {edit(key,value(key,m)=="auto"?"manual":"auto",m);return "changed";}
