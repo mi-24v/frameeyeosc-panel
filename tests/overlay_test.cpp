@@ -88,15 +88,33 @@ int main(){try{
     CHECK(overlay.step(image_model,"Backend running",no_send));CHECK(images.main_uploads==1);
     images.emit(vr::VREvent_ImageFailed,EventOrigin::OwnedOverlay);images.shown=false;
     CHECK(overlay.step(image_model,"Backend running",no_send));CHECK(images.main_uploads==1);
+    CHECK(overlay.ui.image_status.find("Dashboard image failed")!=std::string::npos);
+    Ui clean_ui=overlay.ui;clean_ui.image_status.clear();CHECK(overlay.ui.render(image_model,"Backend running")!=clean_ui.render(image_model,"Backend running"));
     std::this_thread::sleep_for(std::chrono::milliseconds(260));images.shown=true;
     CHECK(overlay.step(image_model,"Backend running",no_send));CHECK(images.main_uploads==2);
     images.emit(vr::VREvent_ImageFailed,EventOrigin::OwnedOverlay);CHECK(overlay.step(image_model,"Backend running",no_send));
     std::this_thread::sleep_for(std::chrono::milliseconds(260));CHECK(overlay.step(image_model,"Backend running",no_send));CHECK(images.main_uploads==3);
     images.emit(vr::VREvent_ImageFailed,EventOrigin::OwnedOverlay);CHECK(overlay.step(image_model,"Backend running",no_send));
     std::this_thread::sleep_for(std::chrono::milliseconds(260));CHECK(overlay.step(image_model,"Backend running",no_send));CHECK(images.main_uploads==3);
+    CHECK(overlay.ui.image_status.find("retries exhausted")!=std::string::npos);
     images.thumb_shown=true;CHECK(overlay.step(image_model,"Backend running",no_send));CHECK(images.thumb_bytes<1024*1024);
     vr::VREvent_t failed{};failed.eventType=vr::VREvent_ImageFailed;images.thumbnail.push_back(failed);CHECK(overlay.step(image_model,"Backend running",no_send));
     std::this_thread::sleep_for(std::chrono::milliseconds(260));CHECK(overlay.step(image_model,"Backend running",no_send));CHECK(images.thumb_uploads==2);
+  }
+  FakeRuntime recovery;recovery.shown=true;
+  {Overlay overlay(recovery);overlay.init();auto no_send=[](const Json&,bool){return false;};
+    CHECK(overlay.step(image_model,"Backend running",no_send));
+    for(int i=0;i<2;++i){recovery.emit(vr::VREvent_ImageFailed,EventOrigin::OwnedOverlay);CHECK(overlay.step(image_model,"Backend running",no_send));std::this_thread::sleep_for(std::chrono::milliseconds(260));CHECK(overlay.step(image_model,"Backend running",no_send));}
+    recovery.emit(vr::VREvent_ImageLoaded,EventOrigin::OwnedOverlay);CHECK(overlay.step(image_model,"Backend running",no_send));CHECK(overlay.ui.image_status.empty());
+    for(int i=0;i<2;++i){auto uploads=recovery.main_uploads;recovery.emit(vr::VREvent_ImageFailed,EventOrigin::OwnedOverlay);CHECK(overlay.step(image_model,"Backend running",no_send));CHECK(overlay.ui.image_status.find("retry pending")!=std::string::npos);std::this_thread::sleep_for(std::chrono::milliseconds(260));CHECK(overlay.step(image_model,"Backend running",no_send));CHECK(recovery.main_uploads==uploads+1);}
+  }
+  FakeRuntime discard;discard.shown=true;Model discard_model=image_model;
+  {Overlay overlay(discard);overlay.init();overlay.ui.edit("eyelid_output_cap","0.6",discard_model);discard_model.state["settings"]["current"]["eyelid_output_cap"]=0.6;
+    CHECK(overlay.step(discard_model,"Backend running",[](const Json&,bool){return false;}));auto before_discard=discard.main_uploads;
+    discard.click(1050,Ui::height-20);CHECK(overlay.step(discard_model,"Backend running",[](const Json&,bool){return false;}));
+    CHECK(discard.main_uploads==before_discard+1);CHECK(discard_model.state["settings"]["current"]["eyelid_output_cap"]==0.6);
+    overlay.ui.save=true;overlay.ui.edit("prefix","/Selected",discard_model);Json sent;
+    discard.click(650,Ui::height-20);CHECK(overlay.step(discard_model,"Backend running",[&](const Json& patch,bool save){CHECK(save);sent=patch;return true;}));CHECK((sent==Json{{"prefix","/Selected"}}));
   }
   // Case preservation must be visible in the actual bitmap, not only model storage.
   Ui ui;Model lower=model;lower.state["settings"]["current"]["prefix"]="/ft";
