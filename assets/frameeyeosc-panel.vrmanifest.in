@@ -1,0 +1,12 @@
+{
+  "source": "frameeyeosc-panel",
+  "applications": [{
+    "app_key": "frameeyeosc.panel",
+    "launch_type": "binary",
+    "binary_path_linux": "@PANEL_BINARY@",
+    "binary_path_linux_arm": "@PANEL_BINARY@",
+    "arguments": "@PANEL_ARGUMENTS@",
+    "is_dashboard_overlay": true,
+    "strings": {"en_us": {"name": "FrameEyeOSC Panel", "description": "Eye tracking settings and owned backend"}}
+  }]
+}
