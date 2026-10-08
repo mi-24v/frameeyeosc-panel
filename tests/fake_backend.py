@@ -31,6 +31,9 @@ while True:
                         response["result"]["settings"]["saved"]["prefix"]="/"+"x"*40000
                     if scenario=="oversized":conn.sendall(b"x"*(1024*1024+1)+b"\n");continue
                     if scenario=="malformed":conn.sendall(b"{not-json}\n");continue
+                    if scenario=="utf8":conn.sendall(b'{"v":1,"type":"event","event":"future","data":{"bad":"\xff"}}\n');continue
+                    if scenario=="depth":conn.sendall(b'{"v":1,"type":"event","event":"future","data":{"deep":'+b'['*65+b'0'+b']'*65+b'}}\n');continue
+                    if scenario=="nonfinite":conn.sendall(b'{"v":1,"type":"event","event":"future","data":{"bad":1e999}}\n');continue
                     if scenario=="duplicate":conn.sendall(json.dumps(response).replace('"v": 1','"v": 1, "v": 1').encode()+b"\n");continue
                     # Multiple lines and arbitrary fragmentation; unknown event must be ignored.
                     payload=json.dumps(response,sort_keys=True,indent=None).encode()+b"\n"+b'{"v":1,"type":"event","event":"future","data":{}}\n'

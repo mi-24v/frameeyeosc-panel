@@ -51,7 +51,7 @@ int main(int argc, char** argv) {
       if(mode=="longsnapshot" && ipc.model.fresh) {if(ipc.model.state["settings"]["current"]["prefix"].get<std::string>().size()!=40001)return 9;std::cout<<"long valid snapshot accepted\n";child.stop();return 0;}
       if(mode=="lifecycle" && ipc.model.fresh) break;
       if((mode=="race" || mode=="reconnect-race") && ipc.ownership_failed()) { child.stop(); std::cout<<"foreign peer rejected\n"; return 0; }
-      if(mode=="protocol" && (ipc.model.status.find("Invalid backend JSON")!=std::string::npos || ipc.model.status.find("1 MiB")!=std::string::npos || ipc.model.status.find("buffer limit")!=std::string::npos)) {std::cout<<ipc.model.status<<"\n";child.stop();return 0;}
+      if(mode=="protocol" && (ipc.model.status.find("Invalid backend JSON")!=std::string::npos || ipc.model.status.find("1 MiB")!=std::string::npos || ipc.model.status.find("buffer limit")!=std::string::npos || ipc.model.status.find("Invalid backend UTF-8")!=std::string::npos || ipc.model.status.find("Duplicate backend JSON key")!=std::string::npos || ipc.model.status.find("Backend JSON nesting")!=std::string::npos || ipc.model.status.find("Nonfinite backend number")!=std::string::npos)) {std::cout<<ipc.model.status<<"\n";child.stop();return 0;}
       if(mode=="crash" && !child.running()) { std::cout<<child.reason()<<"\n"; return 0; }
       if(mode=="real" && ipc.model.fresh && !patched) {
         if(ipc.model.state["settings"]["current"]["target_mode"]!="manual")return 7;

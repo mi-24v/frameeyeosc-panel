@@ -163,12 +163,13 @@ class Processes(unittest.TestCase):
         p=self.launch("longsnapshot","longsnapshot");out,err=p.communicate(timeout=7)
         self.assertEqual(p.returncode,0,err+out);self.assertIn("long valid snapshot",out)
     def test_invalid_and_oversized_backend_lines(self):
-        for scenario in ("malformed","oversized","duplicate"):
+        expected={"malformed":"Invalid backend JSON", "oversized":"IPC line exceeds 1 MiB", "duplicate":"Duplicate backend JSON key", "utf8":"Invalid backend UTF-8", "depth":"Backend JSON nesting exceeds 64", "nonfinite":"Nonfinite backend number"}
+        for scenario,status in expected.items():
             with self.subTest(scenario=scenario):
                 if Path(self.sock).exists():Path(self.sock).unlink()
-                p=self.launch("protocol",scenario);out,err=p.communicate(timeout=7)
+                started=time.monotonic();p=self.launch("protocol",scenario);out,err=p.communicate(timeout=7)
                 self.assertEqual(p.returncode,0,err+out)
-                self.assertTrue("Invalid backend JSON" in out or "1 MiB" in out or "buffer limit" in out)
+                self.assertIn(status,out);self.assertLess(time.monotonic()-started,2.5)
     def test_foreign_peer_on_reconnect_is_not_attached(self):
         p=self.launch("reconnect-race","foreignreconnect")
         line=self.read(p);self.assertTrue(line.startswith("PID "),line)

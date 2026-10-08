@@ -4,6 +4,7 @@
 #include <cmath>
 #include <unordered_set>
 #include <vector>
+#include <stdexcept>
 #include <poll.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -136,22 +137,28 @@ void IpcClient::tick() {
   for(unsigned i=0;i<8;++i) {
     auto lf=input_.find('\n');if(lf==std::string::npos)break;
     if(lf+1>line_limit) {drop("IPC line exceeds 1 MiB");return;}
-    bool valid=true;
     std::vector<std::unordered_set<std::string>> keys;
     auto callback=[&](int depth,Json::parse_event_t event,Json& parsed) {
-      if(depth>64)valid=false;
+      if(depth>64)throw std::runtime_error("Backend JSON nesting exceeds 64");
+      if(event==Json::parse_event_t::value && parsed.is_number_float() && !std::isfinite(parsed.get<double>()))throw std::runtime_error("Nonfinite backend number");
       if(event==Json::parse_event_t::object_start)keys.emplace_back();
-      else if(event==Json::parse_event_t::key && !keys.empty() && !keys.back().insert(parsed.get<std::string>()).second)valid=false;
+      else if(event==Json::parse_event_t::key && !keys.empty() && !keys.back().insert(parsed.get<std::string>()).second)throw std::runtime_error("Duplicate backend JSON key");
       else if(event==Json::parse_event_t::object_end && !keys.empty())keys.pop_back();
       return true;
     };
-    auto message=Json::parse(input_.begin(),input_.begin()+static_cast<std::ptrdiff_t>(lf),callback,false);
+    Json message;
+    try {message=Json::parse(input_.begin(),input_.begin()+static_cast<std::ptrdiff_t>(lf),callback,true);}
+    catch(const Json::out_of_range&) {drop("Nonfinite backend number");return;}
+    catch(const Json::parse_error& error) {
+      drop(std::string(error.what()).find("UTF-8")!=std::string::npos?"Invalid backend UTF-8":"Invalid backend JSON");return;
+    }
+    catch(const std::runtime_error& error) {drop(error.what());return;}
     input_.erase(0,lf+1);
-    if(!valid || message.is_discarded()){drop("Invalid backend JSON");return;}
     model.receive(message);
     if(model.reconnect_requested){drop(model.status+"; reconnecting for state.get. Pending edits require manual Apply.");return;}
   }
-  if(input_.size()>line_limit+16384 || (input_.find('\n')==std::string::npos && input_.size()>=line_limit)){drop("IPC input buffer limit");return;}
+  if(input_.size()>line_limit+16384){drop("IPC input buffer limit");return;}
+  if(input_.find('\n')==std::string::npos && input_.size()>=line_limit){drop("IPC line exceeds 1 MiB");return;}
   if(eof){drop("IPC disconnected; last confirmed state is stale");return;}
   if(model.pending() && now>response_deadline_)drop("IPC response timed out; operation outcome unconfirmed");
 }
