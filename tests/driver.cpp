@@ -28,6 +28,9 @@ int main(int argc, char** argv) {
   std::string mode=argv[1];
   try {
     OwnedChild child;
+#ifdef PANEL_CHILD_TEST_HOOK
+    if(mode=="pre-prctl" && argc==7)child.set_test_gate(std::stoi(argv[5]),std::stoi(argv[6]));
+#endif
     // Verify the pre-exec path resets ignored and blocked termination signals.
     signal(SIGTERM,SIG_IGN); signal(SIGINT,SIG_IGN);
     sigset_t mask; sigemptyset(&mask); sigaddset(&mask,SIGTERM); sigprocmask(SIG_BLOCK,&mask,nullptr);
@@ -36,6 +39,8 @@ int main(int argc, char** argv) {
     IpcClient ipc(argv[3],child);
     auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
     bool patched=false, fresh_again=false;
+    std::chrono::steady_clock::time_point crashed{};
+    std::vector<unsigned char> initial_crash_image;
     DriverRuntime save_runtime;Overlay save_overlay(save_runtime);save_overlay.init();int save_stage=0;
     auto apply_ui=[&] {vr::VREvent_t event{};event.eventType=vr::VREvent_MouseButtonDown;event.data.mouse={650,20,vr::VRMouseButton_Left,0};save_runtime.events.push_back(event);save_overlay.step(ipc,child);};
     while(std::chrono::steady_clock::now()<deadline) {
@@ -52,7 +57,13 @@ int main(int argc, char** argv) {
       if(mode=="lifecycle" && ipc.model.fresh) break;
       if((mode=="race" || mode=="reconnect-race") && ipc.ownership_failed()) { child.stop(); std::cout<<"foreign peer rejected\n"; return 0; }
       if(mode=="protocol" && (ipc.model.status.find("Invalid backend JSON")!=std::string::npos || ipc.model.status.find("1 MiB")!=std::string::npos || ipc.model.status.find("buffer limit")!=std::string::npos || ipc.model.status.find("Invalid backend UTF-8")!=std::string::npos || ipc.model.status.find("Duplicate backend JSON key")!=std::string::npos || ipc.model.status.find("Backend JSON nesting")!=std::string::npos || ipc.model.status.find("Nonfinite backend number")!=std::string::npos)) {std::cout<<ipc.model.status<<"\n";child.stop();return 0;}
-      if(mode=="crash" && !child.running()) { std::cout<<child.reason()<<"\n"; return 0; }
+      if(mode=="crash" && !child.running()) {
+        Ui crash_ui;
+        if(crashed==std::chrono::steady_clock::time_point{}){crashed=std::chrono::steady_clock::now();initial_crash_image=crash_ui.render(ipc.model,"Backend running");}
+        if(ipc.model.status.find("exit 23")==std::string::npos || ipc.model.fresh || ipc.model.pending())return 17;
+        if(crash_ui.render(ipc.model,child.reason())==initial_crash_image)return 18;
+        if(std::chrono::steady_clock::now()-crashed>=std::chrono::seconds(1)){std::cout<<child.reason()<<"; continued IPC and rendering after exit\n";return 0;}
+      }
       if(mode=="real" && ipc.model.fresh && !patched) {
         if(ipc.model.state["settings"]["current"]["target_mode"]!="manual")return 7;
         patched=ipc.patch(Json{{"eyelid_output_cap",0.6},{"prefix","/Panel"},{"one_euro",true},{"one_euro_min_cutoff",0.75},{"one_euro_beta",2.0},{"one_euro_d_cutoff",1.0},{"target_mode","manual"},{"target_host","127.0.0.1"},{"target_port",19001},{"shm_version","auto"}},true);

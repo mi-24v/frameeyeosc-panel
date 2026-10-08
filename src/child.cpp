@@ -59,7 +59,19 @@ void OwnedChild::start(const std::string& backend,const std::string& path,const 
     // Only async-signal-safe Linux operations here. Default/unblock first so
     // inherited panel handlers cannot consume the parent-death signal.
     int error=0;
-    if(sigaction(SIGTERM,&defaults,nullptr)<0 || sigaction(SIGINT,&defaults,nullptr)<0 || sigprocmask(SIG_SETMASK,&empty,nullptr)<0 || prctl(PR_SET_PDEATHSIG,SIGTERM)<0) error=errno;
+    if(sigaction(SIGTERM,&defaults,nullptr)<0 || sigaction(SIGINT,&defaults,nullptr)<0 || sigprocmask(SIG_SETMASK,&empty,nullptr)<0) error=errno;
+#ifdef PANEL_CHILD_TEST_HOOK
+    // Test library only: deterministic gate before parent-death setup.
+    if(!error && ready_fd_>=0 && release_fd_>=0) {
+      const pid_t self=getpid();
+      ssize_t n;do{n=write(ready_fd_,&self,sizeof(self));}while(n<0 && errno==EINTR);
+      if(n!=sizeof(self))_exit(124);
+      char release;do{n=read(release_fd_,&release,1);}while(n<0 && errno==EINTR);
+      if(n!=1)_exit(124);
+      close(ready_fd_);close(release_fd_);
+    }
+#endif
+    if(!error && prctl(PR_SET_PDEATHSIG,SIGTERM)<0)error=errno;
     if(!error && getppid()!=parent) _exit(125);
     if(!error) execve(argv[0],argv.data(),environ);
     if(!error) error=errno;

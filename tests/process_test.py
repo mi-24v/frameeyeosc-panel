@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import select
 import signal
+import struct
 import socket
 import subprocess
 import sys
@@ -98,8 +99,9 @@ class Processes(unittest.TestCase):
         p=subprocess.run([DRIVER,"lifecycle","/missing/backend",self.sock],capture_output=True,text=True,timeout=5)
         self.assertEqual(p.returncode,1);self.assertIn("exec",p.stdout);self.assertNotIn("PID ",p.stdout)
     def test_crash_reason_and_no_restart(self):
-        p=self.launch("crash","crash");out,err=p.communicate(timeout=7)
+        started=time.monotonic();p=self.launch("crash","crash");out,err=p.communicate(timeout=7)
         self.assertEqual(p.returncode,0,err+out);self.assertIn("exit 23",out)
+        self.assertIn("continued IPC and rendering after exit",out);self.assertGreaterEqual(time.monotonic()-started,1.0)
         self.assertEqual((self.root/"log").read_text().count("START"),1)
     def test_sigkill_escalation(self):
         p=self.launch(scenario="ignore");pid=self.ready(p)
@@ -118,6 +120,28 @@ class Processes(unittest.TestCase):
                 self.assertTrue(os.WIFSIGNALED(status));self.assertEqual(os.WTERMSIG(status),signal.SIGTERM);break
             time.sleep(.01)
         else:self.fail("owned child survived parent death")
+    def test_parent_death_before_prctl(self):
+        ready_read,ready_write=os.pipe();release_read,release_write=os.pipe()
+        try:
+            self.config.write_text(json.dumps({"scenario":"normal","log":str(self.root/"log")}))
+            p=subprocess.Popen([DRIVER,"pre-prctl",str(FAKE),self.sock,str(self.config),str(ready_write),str(release_read)],pass_fds=(ready_write,release_read),stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+            self.children.append(p)
+            os.close(ready_write);ready_write=-1;os.close(release_read);release_read=-1
+            self.assertTrue(select.select([ready_read],[],[],3)[0],"pre-prctl gate not reached")
+            child=struct.unpack("i",os.read(ready_read,4))[0];self.owned.add(child)
+            p.kill();p.wait(timeout=3)
+            os.write(release_write,b"x")
+            deadline=time.monotonic()+3
+            while time.monotonic()<deadline:
+                result,status=os.waitpid(child,os.WNOHANG)
+                if result:break
+                time.sleep(.005)
+            else:self.fail("pre-prctl child survived")
+            self.assertTrue(os.WIFEXITED(status));self.assertEqual(os.WEXITSTATUS(status),125)
+            self.assertFalse((self.root/"log").exists(),"child must not exec backend")
+        finally:
+            for fd in (ready_read,ready_write,release_read,release_write):
+                if fd>=0:os.close(fd)
     def test_parent_death_during_startup(self):
         self.assertEqual(ctypes.CDLL(None).prctl(36,1,0,0,0),0)
         for _ in range(12):
