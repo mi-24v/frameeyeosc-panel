@@ -36,8 +36,17 @@ int main(int argc, char** argv) {
     IpcClient ipc(argv[3],child);
     auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
     bool patched=false, fresh_again=false;
+    DriverRuntime save_runtime;Overlay save_overlay(save_runtime);save_overlay.init();int save_stage=0;
+    auto apply_ui=[&] {vr::VREvent_t event{};event.eventType=vr::VREvent_MouseButtonDown;event.data.mouse={650,20,vr::VRMouseButton_Left,0};save_runtime.events.push_back(event);save_overlay.step(ipc,child);};
     while(std::chrono::steady_clock::now()<deadline) {
       child.poll(); ipc.tick();
+      if(mode=="save-ui" && ipc.model.fresh && !ipc.model.pending()) {
+        save_overlay.step(ipc,child);
+        if(save_stage==0){if(!save_overlay.ui.edit("eyelid_output_cap","0.6",ipc.model))return 11;apply_ui();save_stage=1;}
+        else if(save_stage==1){if(ipc.model.state["settings"]["current"]["eyelid_output_cap"]!=0.6 || ipc.model.state["settings"]["saved"].contains("eyelid_output_cap"))return 12;save_overlay.ui.save=true;if(save_overlay.ui.patch(ipc.model)!=Json{{"eyelid_output_cap",0.6}})return 13;apply_ui();save_stage=2;}
+        else if(save_stage==2){if(ipc.model.state["settings"]["saved"]["eyelid_output_cap"]!=0.6)return 14;save_overlay.ui.edit("prefix",save_overlay.ui.value("prefix",ipc.model),ipc.model);if(save_overlay.ui.patch(ipc.model).size()!=1 || !save_overlay.ui.patch(ipc.model).contains("prefix"))return 15;apply_ui();save_stage=3;}
+        else {if(ipc.model.state["settings"]["saved"]["prefix"]!=ipc.model.state["settings"]["current"]["prefix"] || !save_overlay.ui.patch(ipc.model).empty())return 16;std::cout<<"UI trial then save and selected current field confirmed\n";child.stop();return 0;}
+      }
       if(mode=="longsnapshot" && ipc.model.fresh) {if(ipc.model.state["settings"]["current"]["prefix"].get<std::string>().size()!=40001)return 9;std::cout<<"long valid snapshot accepted\n";child.stop();return 0;}
       if(mode=="lifecycle" && ipc.model.fresh) break;
       if((mode=="race" || mode=="reconnect-race") && ipc.ownership_failed()) { child.stop(); std::cout<<"foreign peer rejected\n"; return 0; }

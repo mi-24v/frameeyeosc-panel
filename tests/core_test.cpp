@@ -37,6 +37,13 @@ int main() { try {
   m.receive(Json{{"v",1},{"type","response"},{"id","limit"},{"ok",false},{"result",Json::object()},{"error",Json{{"code","request_limit"},{"message","reconnect"}}}});
   CHECK(!m.pending()); CHECK(m.status.find("request_limit")!=std::string::npos);
   CHECK(m.state["settings"]["current"]["prefix"]=="/FT");
+  Ui save_ui;Model save_model=m;
+  CHECK(save_ui.edit("eyelid_output_cap","0.6",save_model));
+  save_model.state["settings"]["current"]["eyelid_output_cap"]=0.6; // confirmed save:false result
+  CHECK(save_ui.patch(save_model).empty());
+  save_ui.save=true;CHECK((save_ui.patch(save_model)==Json{{"eyelid_output_cap",0.6}}));
+  Ui cli_ui;CHECK(cli_ui.edit("prefix","/FT",save_model));cli_ui.save=true;
+  CHECK((cli_ui.patch(save_model)==Json{{"prefix","/FT"}}));
   auto pixels=ui.render(m,"running"); CHECK(pixels.size()==Ui::width*Ui::height*4);
   auto long_model=m;long_model.state["settings"]["current"]["prefix"]="/"+std::string(100,'x');
   auto clipped=ui.render(long_model,"running");

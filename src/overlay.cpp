@@ -98,8 +98,20 @@ bool Ui::edit(const std::string& key,const std::string& text,const Model& m) {
 }
 Json Ui::patch(const Model& m) const {
   Json result=Json::object();const auto applied=current(m);
-  for(const auto& [key,value]:draft_) if(!applied.contains(key)||applied[key]!=value) result[key]=value;
+  const Json saved=m.state.contains("settings")?m.state["settings"].value("saved",Json::object()):Json::object();
+  for(const auto& [key,value]:draft_) {
+    if(!applied.contains(key)||applied[key]!=value || (save && (!saved.contains(key)||saved[key]!=value)))result[key]=value;
+  }
   return result;
+}
+void Ui::confirmed(const Model& m) {
+  if(m.pending()||!m.fresh)return;
+  const auto applied=current(m);
+  const Json saved=m.state.contains("settings")?m.state["settings"].value("saved",Json::object()):Json::object();
+  for(auto it=draft_.begin();it!=draft_.end();) {
+    if(applied.contains(it->first)&&applied[it->first]==it->second&&saved.contains(it->first)&&saved[it->first]==it->second)it=draft_.erase(it);
+    else ++it;
+  }
 }
 std::string Ui::value(const std::string& key,const Model& m) const {
   const auto it=draft_.find(key);if(it!=draft_.end())return display(it->second);
@@ -225,7 +237,9 @@ bool Overlay::step(Model& model,const std::string& backend,const std::function<b
         keyboard_key_.clear();keyboard_opened_=false;return false;
       }
       if(action=="apply") {
-        if(!submit(ui.patch(model),ui.save))ui.error="No changes queued; confirm connection and changed values";
+        const auto patch=ui.patch(model);
+        if(patch.empty())ui.error="No changed or unsaved selected values";
+        else {ui.error.clear();submit(patch,ui.save);} // Failure reason belongs to model.status.
       } else if(action!="" && action!="changed" && action!="save") {
         const auto token=++keyboard_token_;
         auto error=runtime_->keyboard(handle_,action,ui.value(action,model),token);
@@ -240,7 +254,7 @@ bool Overlay::step(Model& model,const std::string& backend,const std::function<b
   for(unsigned i=0;i<64 && runtime_->poll(EventOrigin::OwnedOverlay,handle_,e);++i)if(!event(e,EventOrigin::OwnedOverlay,handle_))return false;
   for(unsigned i=0;i<64 && runtime_->poll(EventOrigin::OwnedOverlay,thumbnail_,e);++i)if(!event(e,EventOrigin::OwnedOverlay,thumbnail_))return false;
   // No optimistic draft clearing: clear only values now confirmed by the backend.
-  if(!model.pending() && model.fresh && ui.patch(model).empty())ui.accepted();
+  ui.confirmed(model);
   const std::string signature=model.state.dump()+model.status+backend+ui.patch(model).dump()+ui.error+(ui.save?"save":"nosave")+(model.fresh?"fresh":"stale");
   if(runtime_->visible(handle_) && signature!=last_main_) {
     auto bytes=ui.render(model,backend);runtime_->raw(handle_,bytes);last_main_=signature;

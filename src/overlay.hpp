@@ -19,7 +19,7 @@ public:
   Json patch(const Model& model) const;
   std::string value(const std::string& key,const Model& model) const;
   std::string click(float x,float y,const Model& model);
-  void accepted(){draft_.clear();}
+  void confirmed(const Model& model);
   std::vector<unsigned char> render(const Model& model,const std::string& backend) const;
 };
 class OverlayRuntime {

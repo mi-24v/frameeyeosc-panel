@@ -85,6 +85,11 @@ class Processes(unittest.TestCase):
         p.stdin.write("uiclose\n");p.stdin.flush()
         out,err=p.communicate(timeout=5);self.assertEqual(p.returncode,0,err+out)
         self.assertFalse(Path(f"/proc/{pid}").exists())
+    def test_ui_trial_then_save_selected_fields(self):
+        p=self.launch("save-ui","saveui");out,err=p.communicate(timeout=7)
+        self.assertEqual(p.returncode,0,err+out);self.assertIn("UI trial then save",out)
+        params=[json.loads(line) for line in (self.root/"log").read_text().splitlines() if line.startswith("{")]
+        self.assertEqual(params,[{"patch":{"eyelid_output_cap":.6},"save":False},{"patch":{"eyelid_output_cap":.6},"save":True},{"patch":{"prefix":"/FT"},"save":True}])
     def test_exec_failure(self):
         p=subprocess.run([DRIVER,"lifecycle","/missing/backend",self.sock],capture_output=True,text=True,timeout=5)
         self.assertEqual(p.returncode,1);self.assertIn("exec",p.stdout);self.assertNotIn("PID ",p.stdout)

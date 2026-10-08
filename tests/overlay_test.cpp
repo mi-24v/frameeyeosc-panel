@@ -74,6 +74,12 @@ int main(){try{
   }
   FakeRuntime direct_close;
   {Overlay overlay(direct_close);overlay.init();direct_close.click(30,Ui::height-20);CHECK(!overlay.step(cancel_model,"Backend running",send));}
+  FakeRuntime submission;Model submission_model;submission_model.expect("s1","state.get",Json::object());submission_model.receive(response);
+  {Overlay overlay(submission);overlay.init();overlay.ui.edit("prefix","/Change",submission_model);
+    submission.click(650,Ui::height-20);
+    auto refused=[&](const Json&,bool){submission_model.disconnected("Reconnecting at request limit; apply again after synchronization");return false;};
+    CHECK(overlay.step(submission_model,"Backend running",refused));CHECK(overlay.ui.error.empty());CHECK(submission_model.status.find("Reconnecting at request limit")!=std::string::npos);
+  }
   // Case preservation must be visible in the actual bitmap, not only model storage.
   Ui ui;Model lower=model;lower.state["settings"]["current"]["prefix"]="/ft";
   CHECK(ui.render(model,"Backend running")!=ui.render(lower,"Backend running"));

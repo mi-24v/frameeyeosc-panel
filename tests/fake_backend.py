@@ -34,6 +34,14 @@ while True:
                 elif request["method"]=="settings.patch":
                     response=dict(fixture[8]);response["id"]=request["id"]
                     response["result"]=dict(response["result"]);response["result"]["current"]=fixture[1]["result"]["settings"]["current"]
+                    if scenario=="saveui":
+                        patch=request["params"]["patch"];state=fixture[1]["result"]
+                        state["settings"]["current"].update(patch)
+                        state["settings"]["sources"].update({key:"panel" for key in patch})
+                        if request["params"]["save"]:state["settings"]["saved"].update(patch)
+                        response["ok"]=True;response["error"]=None
+                        response["result"]={"current":state["settings"]["current"],"sources":state["settings"]["sources"],"osc_target":state["osc_target"],"output":state["output"],"save":"saved" if request["params"]["save"] else "not_requested"}
+                        log(json.dumps(request["params"],sort_keys=True))
                     if scenario=="requestlimit":
                         response["result"]={};response["error"]={"code":"request_limit","message":"reconnect"}
                     conn.sendall(json.dumps(response).encode()+b"\n")
