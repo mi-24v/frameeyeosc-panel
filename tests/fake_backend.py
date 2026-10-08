@@ -13,6 +13,7 @@ if scenario=="ignore":signal.signal(signal.SIGTERM,signal.SIG_IGN)
 if scenario=="delay":time.sleep(5)
 fixture=[json.loads(s) for s in Path(__file__).with_name("fixtures").joinpath("ipc-v1-subset.jsonl").read_text().splitlines()]
 server=socket.socket(socket.AF_UNIX);server.bind(sock);server.listen(4)
+first_state=True
 while True:
     conn,_=server.accept()
     try:
@@ -22,6 +23,9 @@ while True:
                 if request["method"]=="state.get":
                     response=dict(fixture[1]);response["id"]=request["id"]
                     response["extra"]=True
+                    if scenario=="stateerror" and first_state:
+                        response["ok"]=False;response["result"]={};response["error"]={"code":"temporarily_unavailable","message":"try state again"}
+                    first_state=False
                     if scenario=="longsnapshot":
                         response["result"]["settings"]["current"]["prefix"]="/"+"x"*40000
                         response["result"]["settings"]["saved"]["prefix"]="/"+"x"*40000

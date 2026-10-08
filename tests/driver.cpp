@@ -47,6 +47,7 @@ int main(int argc, char** argv) {
         else if(save_stage==2){if(ipc.model.state["settings"]["saved"]["eyelid_output_cap"]!=0.6)return 14;save_overlay.ui.edit("prefix",save_overlay.ui.value("prefix",ipc.model),ipc.model);if(save_overlay.ui.patch(ipc.model).size()!=1 || !save_overlay.ui.patch(ipc.model).contains("prefix"))return 15;apply_ui();save_stage=3;}
         else {if(ipc.model.state["settings"]["saved"]["prefix"]!=ipc.model.state["settings"]["current"]["prefix"] || !save_overlay.ui.patch(ipc.model).empty())return 16;std::cout<<"UI trial then save and selected current field confirmed\n";child.stop();return 0;}
       }
+      if(mode=="state-error" && ipc.connections()>1 && ipc.model.fresh && !ipc.model.pending()){std::cout<<"state error recovered by state.get\n";child.stop();return 0;}
       if(mode=="longsnapshot" && ipc.model.fresh) {if(ipc.model.state["settings"]["current"]["prefix"].get<std::string>().size()!=40001)return 9;std::cout<<"long valid snapshot accepted\n";child.stop();return 0;}
       if(mode=="lifecycle" && ipc.model.fresh) break;
       if((mode=="race" || mode=="reconnect-race") && ipc.ownership_failed()) { child.stop(); std::cout<<"foreign peer rejected\n"; return 0; }

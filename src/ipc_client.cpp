@@ -66,7 +66,7 @@ void Model::receive(const Json& j) {
     state["osc_target"]=result["osc_target"];state["output"]=result["output"];
     if(ok && result["save"]=="saved") for(auto it=params_["patch"].begin();it!=params_["patch"].end();++it) state["settings"]["saved"][it.key()]=result["current"][it.key()];
   }
-  reconnect_requested=!ok && j["error"]["code"]=="request_limit";
+  reconnect_requested=!ok && (method_=="state.get" || j["error"]["code"]=="request_limit");
   status=ok?(method_=="settings.patch"?"Applied; save: "+result["save"].get<std::string>():"Actual state confirmed"):"Error: "+j["error"]["code"].get<std::string>()+": "+j["error"]["message"].get<std::string>();
   id_.clear();method_.clear();params_=Json::object();
 }
@@ -149,7 +149,7 @@ void IpcClient::tick() {
     input_.erase(0,lf+1);
     if(!valid || message.is_discarded()){drop("Invalid backend JSON");return;}
     model.receive(message);
-    if(model.reconnect_requested){drop("Backend request_limit: operation not applied; reconnecting for state.get. Apply again manually.");return;}
+    if(model.reconnect_requested){drop(model.status+"; reconnecting for state.get. Pending edits require manual Apply.");return;}
   }
   if(input_.size()>line_limit+16384 || (input_.find('\n')==std::string::npos && input_.size()>=line_limit)){drop("IPC input buffer limit");return;}
   if(eof){drop("IPC disconnected; last confirmed state is stale");return;}
