@@ -15,6 +15,8 @@ class Ui {
 public:
   static constexpr int width=1440,height=1080,rows_top=130,row_height=65;
   static const std::vector<std::string> fields;
+  bool calibration_page=false;
+  static const std::vector<std::string> calibration_fields;
   bool save=false;
   std::string error,image_status;
   bool edit(const std::string& key,const std::string& text,const Model& model);
@@ -63,7 +65,7 @@ public:
   Overlay& operator=(const Overlay&)=delete;
   void init();
   bool step(IpcClient& ipc,OwnedChild& child);
-  bool step(Model& model,const std::string& backend,const std::function<bool(const Json&,bool)>& submit);
+  bool step(Model& model,const std::string& backend,const std::function<bool(const Json&,bool)>& submit,const std::function<bool(const std::string&)>& calibrate={});
   Ui ui;
 };
 }

@@ -6,13 +6,20 @@
 #include <limits>
 #include <stdexcept>
 #include <iostream>
+#include <sstream>
+#include <iomanip>
 namespace panel {
 bool ends_session(uint32_t event,EventOrigin origin,vr::VROverlayHandle_t event_handle,vr::VROverlayHandle_t own_handle) {
   return (event==vr::VREvent_Quit && (origin==EventOrigin::System || event_handle==own_handle)) || (event==vr::VREvent_OverlayClosed && origin==EventOrigin::OwnedOverlay && event_handle==own_handle);
 }
 const std::vector<std::string> Ui::fields={"eyelid_output_cap","prefix","one_euro","one_euro_min_cutoff","one_euro_beta","one_euro_d_cutoff","target_mode","target_host","target_port","shm_version"};
+const std::vector<std::string> Ui::calibration_fields={"eye_widening","eye_widening_margin_left","eye_widening_margin_right","min_base_width","min_wide_width"};
 namespace {
 std::string display(const Json& j){return j.is_string()?j.get<std::string>():j.dump();}
+std::string metric(const Json& j) {
+  if(!j.is_number())return display(j);
+  std::ostringstream text;text<<std::setprecision(6)<<j.get<double>();return text.str();
+}
 Json current(const Model& m) {
   if(m.state.contains("settings") && m.state["settings"].contains("current")) return m.state["settings"]["current"];
   return Json::object();
@@ -78,8 +85,9 @@ void vrcheck(vr::EVROverlayError error,const char* operation){if(error!=vr::VROv
 }
 bool Ui::edit(const std::string& key,const std::string& text,const Model& m) {
   error.clear();
+  if(!m.fresh){error="Wait for a fresh state snapshot";return false;}
   if(m.pending()){error="Wait for backend response before editing";return false;}
-  if(std::find(fields.begin(),fields.end(),key)==fields.end())return false;
+  if(std::find(fields.begin(),fields.end(),key)==fields.end() && std::find(calibration_fields.begin(),calibration_fields.end(),key)==calibration_fields.end())return false;
   Json value;
   if(key=="prefix" || key=="target_host") {
     if(!ascii(text) || text.size()>1024 || (key=="prefix" && (text.empty()||text[0]!='/')) || (key=="target_host" && text.empty())) {error="Enter a printable ASCII value (prefix starts with /)";return false;}
@@ -88,14 +96,14 @@ bool Ui::edit(const std::string& key,const std::string& text,const Model& m) {
     if(key=="target_mode" && text!="auto" && text!="manual")return false;
     if(key=="shm_version" && text!="auto" && text!="4" && text!="5")return false;
     value=text;
-  } else if(key=="one_euro") {
+  } else if(key=="one_euro" || key=="eye_widening") {
     if(text!="true" && text!="false")return false;
     value=text=="true";
   } else {
     value=Json::parse(text,nullptr,false);
     if(value.is_discarded() || !value.is_number()) {error="Enter a finite number";return false;}
     const double number=value.get<double>();
-    if(!std::isfinite(number) || (key=="target_port" && (!value.is_number_integer()||number<1||number>65535)) || (key=="eyelid_output_cap" && (number<0||number>1)) || (key=="one_euro_beta" && number<0) || ((key=="one_euro_min_cutoff"||key=="one_euro_d_cutoff") && (number<=0 || number>std::numeric_limits<float>::max() || static_cast<float>(number)==0))) {error="Out of range: cap 0..1; port integer 1..65535; cutoff >0; beta >=0";return false;}
+    if(!std::isfinite(number) || (key=="target_port" && (!value.is_number_integer()||number<1||number>65535)) || (key=="eyelid_output_cap" && (number<0||number>1)) || ((key=="one_euro_beta" || key.find("eye_widening_margin_")==0) && number<0) || ((key=="min_base_width" || key=="min_wide_width") && (number<=0 || number>1)) || ((key=="one_euro_min_cutoff"||key=="one_euro_d_cutoff") && (number<=0 || number>std::numeric_limits<float>::max() || static_cast<float>(number)==0))) {error="Out of range: cap 0..1; port integer 1..65535; cutoff >0; beta >=0";return false;}
     if(key!="target_port") value=number;
   }
   draft_[key]=value;++revision_;return true;
@@ -123,6 +131,14 @@ std::string Ui::value(const std::string& key,const Model& m) const {
 }
 std::string Ui::click(float x,float y,const Model& m) {
   if(!std::isfinite(x)||!std::isfinite(y)||x<0||x>=width||y<0||y>=height)return "";
+  if(y>=20 && y<55) {
+    if(x>=800 && x<1050){calibration_page=false;++revision_;return "page";}
+    if(x>=1070 && x<1424){calibration_page=true;++revision_;return "page";}
+  }
+  if(calibration_page && y>=875 && y<925) {
+    const std::string method=x>=16 && x<300?"calibration.start":x>=320 && x<640?"calibration.begin_stage":x>=660 && x<950?"calibration.skip_wide":x>=970 && x<1424?"calibration.cancel":"";
+    return m.calibration_allowed(method)?method:"";
+  }
   if(y>=height-55) {
     if(y>=height-10)return "";
     if(x>=16&&x<244)return "close";
@@ -133,10 +149,11 @@ std::string Ui::click(float x,float y,const Model& m) {
     return "";
   }
   if(m.pending()||!m.fresh)return "";
-  if(x>=16 && x<width-16 && y>=rows_top && y<rows_top+row_height*static_cast<int>(fields.size())) {
+  const auto& shown_fields=calibration_page?calibration_fields:fields;
+  if(x>=16 && x<width-16 && y>=rows_top && y<rows_top+row_height*static_cast<int>(shown_fields.size())) {
     if(static_cast<int>(y-rows_top)%row_height>=row_height-3)return "";
-    const auto key=fields[static_cast<size_t>((y-rows_top)/row_height)];
-    if(key=="one_euro") {edit(key,value(key,m)=="true"?"false":"true",m);return "changed";}
+    const auto key=shown_fields[static_cast<size_t>((y-rows_top)/row_height)];
+    if(key=="one_euro" || key=="eye_widening") {edit(key,value(key,m)=="true"?"false":"true",m);return "changed";}
     if(key=="target_mode") {edit(key,value(key,m)=="auto"?"manual":"auto",m);return "changed";}
     if(key=="shm_version") {auto old=value(key,m);edit(key,old=="auto"?"4":old=="4"?"5":"auto",m);return "changed";}
     return key;
@@ -146,11 +163,14 @@ std::string Ui::click(float x,float y,const Model& m) {
 std::vector<unsigned char> Ui::render(const Model& m,const std::string& backend) const {
   Canvas c;c.rect(0,0,width,height,{16,23,35});
   c.text(24,22,"FrameEyeOSC Panel 0.1.0",3);
+  c.rect(800,20,250,35,calibration_page?std::array<unsigned char,3>{45,65,90}:std::array<unsigned char,3>{40,90,75});c.text(820,30,"Settings");
+  c.rect(1070,20,354,35,calibration_page?std::array<unsigned char,3>{40,90,75}:std::array<unsigned char,3>{45,65,90});c.text(1090,30,"Calibration");
   c.text(24,57,m.fresh?"Actual state confirmed":"STALE / UNCONFIRMED - last known values",2,1380,m.fresh?std::array<unsigned char,3>{110,230,160}:std::array<unsigned char,3>{255,190,80});
   c.text(24,85,backend);c.text(24,108,"Setting (click to edit)          Current                      Saved                    Source");
   const auto applied=current(m);
-  for(size_t i=0;i<fields.size();++i) {
-    int y=rows_top+static_cast<int>(i)*row_height;const auto& key=fields[i];
+  const auto& shown_fields=calibration_page?calibration_fields:fields;
+  for(size_t i=0;i<shown_fields.size();++i) {
+    int y=rows_top+static_cast<int>(i)*row_height;const auto& key=shown_fields[i];
     c.rect(16,y,width-32,row_height-3,i%2?std::array<unsigned char,3>{28,37,51}:std::array<unsigned char,3>{22,31,45});
     c.text(24,y+10,key,2,390);
     c.text(425,y+10,applied.contains(key)?display(applied[key]):"--",2,375);
@@ -163,16 +183,52 @@ std::vector<unsigned char> Ui::render(const Model& m,const std::string& backend)
     c.text(825,y+10,saved,2,370);c.text(1230,y+10,source,2,185);
     if(draft_.count(key))c.text(425,y+36,"Draft: "+value(key,m),2,970,{130,190,255});
   }
-  int y=rows_top+row_height*static_cast<int>(fields.size())+8;
-  if(m.state.contains("tracking"))c.text(24,y,"Tracking: "+display(m.state["tracking"])+"   Stream: "+display(m.state["stream"]["state"])+"   Peer: "+display(m.state["stream"]["peer"]));
-  if(m.state.contains("output")) {
-    c.text(24,y+24,"Actual OSC: "+display(m.state["osc_target"]));
-    c.text(24,y+48,"Output: "+display(m.state["output"]["state"])+"   Reason: "+display(m.state["output"]["reason"]));
+  if(calibration_page) {
+    c.text(24,480,"Applied profile (used until a replacement is saved)");
+    const auto profile=m.state.value("active_profile",Json());
+    if(profile.is_null())c.text(24,510,"Uncalibrated: raw compatibility output");
+    else for(int side=0;side<2;++side) {
+      const auto& eye=profile[side?"right":"left"];const int x=24+side*710;
+      c.text(x,510,side?"Right eye":"Left eye",2,680);
+      c.text(x,535,"Closed: "+metric(eye["closed"])+"  Natural: "+metric(eye["relaxed"]),2,680);
+      c.text(x,560,"Natural max: "+metric(eye["relaxed_max"])+"  Wide: "+metric(eye["wide"]),2,680);
+      c.text(x,585,"d: "+metric(eye["d"])+"  Wide start: "+metric(eye["wide_start"]),2,680);
+      c.text(x,610,"Wide available: "+display(eye["wide_available"]),2,680);
+      c.text(x,635,"Reason: "+display(eye["wide_unavailable_reason"]),2,680);
+    }
+    const auto cal=m.state.value("calibration",Json());
+    if(cal.is_null())c.text(24,690,"Start calibration, then begin each stage manually.");
+    else {
+      c.text(24,690,"Session: "+display(cal["session_id"]),2,1380);
+      c.text(24,715,"State: "+display(cal["state"])+"  Stage: "+display(cal["stage"])+"  Remaining: "+display(cal["remaining_ms"])+" ms");
+      const auto& result=cal["result"];
+      if(!result.is_null()) {
+        c.text(24,740,"Result: "+display(result["kind"])+"  Stage: "+display(result["stage"])+"  Reason: "+display(result["reason"]));
+        c.text(24,765,"Result cause: "+display(result["caused_by"])+"  Wide L/R: "+display(result["wide_available"]));
+      }
+      c.text(24,790,"State cause: "+display(cal["caused_by"]));
+      if(!result.is_null() && result["reason"]=="invalid_interval")c.text(24,820,"Retry natural opening; to redo closed eyes, Cancel and Start again.",2,1380,{255,190,80});
+      else c.text(24,820,"Closed eyes -> natural opening -> optional wide opening. Each stage: 2s prepare, 5s measure.");
+    }
+    const std::array<std::string,4> methods={"calibration.start","calibration.begin_stage","calibration.skip_wide","calibration.cancel"};
+    const std::array<std::string,4> labels={"Start","Begin stage","Skip wide","Cancel"};
+    const std::array<int,4> xs={16,320,660,970},ws={284,320,290,454};
+    for(size_t i=0;i<4;++i) {
+      c.rect(xs[i],875,ws[i],50,m.calibration_allowed(methods[i])?std::array<unsigned char,3>{40,90,75}:std::array<unsigned char,3>{45,48,55});
+      c.text(xs[i]+14,891,labels[i],3,ws[i]-28);
+    }
+  } else {
+    const int y=rows_top+row_height*static_cast<int>(fields.size())+8;
+    if(m.state.contains("tracking"))c.text(24,y,"Tracking: "+display(m.state["tracking"])+"   Stream: "+display(m.state["stream"]["state"])+"   Peer: "+display(m.state["stream"]["peer"]));
+    if(m.state.contains("output")) {
+      c.text(24,y+24,"Actual OSC: "+display(m.state["osc_target"]));
+      c.text(24,y+48,"Output: "+display(m.state["output"]["state"])+"   Reason: "+display(m.state["output"]["reason"]));
+    }
+    c.text(24,y+75,"Use the Calibration tab for manual measurement and eye widening settings.");
   }
-  c.text(24,y+75,"Calibration unavailable in this build",2,1380,{255,190,80});
-  c.text(24,y+99,m.status,2,1380);
-  c.text(24,y+123,error,2,1380,{255,120,120});
-  c.text(24,y+149,image_status.empty()?"Drafts apply only after response. Close stops owned backend. Relaunch manually.":image_status,2,1380,{255,190,80});
+  c.text(24,950,m.status,2,1380);
+  c.text(24,975,error,2,1380,{255,120,120});
+  c.text(24,1000,image_status.empty()?"Apply confirms settings. Calibration replaces the profile only after atomic save.":image_status,2,1380,{255,190,80});
   c.rect(16,height-55,228,45,{110,45,50});c.text(30,height-41,"Close",3);
   c.rect(260,height-55,320,45,{45,65,90});c.text(274,height-41,save?"Save: true":"Save: false",3);
   c.rect(595,height-55,340,45,{40,90,75});c.text(610,height-41,m.pending()?"Pending...":"Apply changes",3);
@@ -224,9 +280,9 @@ Overlay::Overlay():sdk_(std::make_unique<SdkRuntime>()),runtime_(sdk_.get()){}
 Overlay::~Overlay(){if(!keyboard_key_.empty())runtime_->hide_keyboard();runtime_->shutdown(handle_,thumbnail_);}
 void Overlay::init(){runtime_->init(handle_,thumbnail_);}
 bool Overlay::step(IpcClient& ipc,OwnedChild& child) {
-  return step(ipc.model,child.reason(),[&](const Json& patch,bool save){return ipc.patch(patch,save);});
+  return step(ipc.model,child.reason(),[&](const Json& patch,bool save){return ipc.patch(patch,save);},[&](const std::string& method){return ipc.calibrate(method);});
 }
-bool Overlay::step(Model& model,const std::string& backend,const std::function<bool(const Json&,bool)>& submit) {
+bool Overlay::step(Model& model,const std::string& backend,const std::function<bool(const Json&,bool)>& submit,const std::function<bool(const std::string&)>& calibrate) {
   auto failed_image=[&](vr::VROverlayHandle_t handle,const std::string& detail) {
     auto& image=handle==handle_?main_image_:thumb_image_;
     image.signature.clear();image.retry_after=runtime_->now()+std::chrono::milliseconds(250);
@@ -271,7 +327,9 @@ bool Overlay::step(Model& model,const std::string& backend,const std::function<b
         const auto patch=ui.patch(model);
         if(patch.empty())ui.error="No changed or unsaved selected values";
         else {ui.error.clear();submit(patch,ui.save);} // Failure reason belongs to model.status.
-      } else if(action!="" && action!="changed" && action!="save" && action!="discard") {
+      } else if(action.find("calibration.")==0) {
+        if(calibrate)calibrate(action);
+      } else if(action!="" && action!="changed" && action!="save" && action!="discard" && action!="page") {
         const auto token=++keyboard_token_;
         auto error=runtime_->keyboard(handle_,action,ui.value(action,model),token);
         if(error.empty()){keyboard_key_=action;keyboard_opened_=false;}

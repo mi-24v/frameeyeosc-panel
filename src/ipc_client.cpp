@@ -26,6 +26,7 @@ bool settings(const Json& value,bool full) {
       if(name=="eyelid_output_cap" && (number<0 || number>1)) return false;
       if((name=="one_euro_beta" || name.find("eye_widening_margin_")==0) && number<0) return false;
       if((name=="one_euro_min_cutoff" || name=="one_euro_d_cutoff" || name=="min_base_width" || name=="min_wide_width") && number<=0) return false;
+      if((name=="min_base_width" || name=="min_wide_width") && number>1)return false;
     } else if(!item.is_string()) return false;
   }
   return true;
@@ -77,6 +78,25 @@ bool snapshot(const Json& j) {
   return s.contains("current")&&settings(s["current"],true)&&s.contains("saved")&&settings(s["saved"],false)&&s.contains("sources")&&sources(s["sources"])&&j.contains("instance_id")&&j["instance_id"].is_string()&&j.contains("connection_id")&&j["connection_id"].is_string()&&j.contains("tracking")&&j["tracking"].is_string()&&j.contains("stream")&&j["stream"].is_object()&&j["stream"].contains("state")&&j["stream"]["state"].is_string()&&j["stream"].contains("peer")&&(j["stream"]["peer"].is_null()||j["stream"]["peer"].is_string())&&target_output(j)&&j.contains("active_profile")&&profile(j["active_profile"])&&j.contains("calibration")&&calibration(j["calibration"]);
 }
 }
+bool Model::calibration_allowed(const std::string& method) const {
+  if(!fresh)return false;
+  const auto c=state.value("calibration",Json());
+  const bool active=c.is_object() && (c["state"]=="waiting" || c["state"]=="preparing" || c["state"]=="measuring");
+  if(method=="calibration.cancel")return active || (pending() && method_=="calibration.start");
+  if(pending())return false;
+  if(method=="calibration.start")return !active;
+  if(method=="calibration.begin_stage")return active && c["state"]=="waiting";
+  if(method=="calibration.skip_wide")return active && c["state"]=="waiting" && c["stage"]=="wide";
+  return false;
+}
+Json Model::calibration_params(const std::string& method) const {
+  if(method=="calibration.start" || (method=="calibration.cancel" && pending() && method_=="calibration.start"))return Json::object();
+  const auto c=state.value("calibration",Json());
+  if(!c.is_object())return Json::object();
+  Json params={{"session_id",c["session_id"]}};
+  if(method=="calibration.begin_stage")params["stage"]=c["stage"];
+  return params;
+}
 void Model::expect(const std::string& id,const std::string& method,const Json& params) {
   reconnect_requested=false;id_=id;method_=method;params_=params;status=method=="state.get"?"Synchronizing actual state":"Pending backend response";
 }
@@ -116,6 +136,7 @@ IpcClient::~IpcClient(){if(fd_>=0) close(fd_);}
 void IpcClient::drop(const std::string& reason) {
   if(fd_>=0) close(fd_);
   fd_=-1;connecting_=false;input_.clear();output_.clear();offset_=0;
+  cancel_queued_=false;cancel_session_.clear();
   model.disconnected(reason);retry_=std::chrono::steady_clock::now()+std::chrono::milliseconds(250);
 }
 bool IpcClient::connected() {
@@ -137,6 +158,18 @@ bool IpcClient::patch(const Json& patch,bool save) {
   const auto params=Json{{"patch",patch},{"save",save}};
   if(params.dump().size()>request_limit-512) {model.status="Patch exceeds IPC size limit";return false;}
   request("settings.patch",params);return true;
+}
+bool IpcClient::calibrate(const std::string& method) {
+  if(fd_<0 || connecting_ || !model.calibration_allowed(method))return false;
+  if(method=="calibration.cancel" && model.pending()) {
+    cancel_queued_=true;
+    const auto params=model.calibration_params(method);
+    cancel_session_=params.value("session_id",std::string());
+    model.status="Cancel queued after pending response";
+    return true;
+  }
+  if(sequence_>=4096){drop("Reconnecting at request limit; calibration outcome requires synchronization");return false;}
+  request(method,model.calibration_params(method));return true;
 }
 void IpcClient::tick() {
   child_.poll();
@@ -200,6 +233,15 @@ void IpcClient::tick() {
   }
   if(input_.size()>line_limit+16384){drop("IPC input buffer limit");return;}
   if(input_.find('\n')==std::string::npos && input_.size()>=line_limit){drop("IPC line exceeds 1 MiB");return;}
+  if(cancel_queued_ && !model.pending()) {
+    cancel_queued_=false;
+    if(cancel_session_.empty() && model.calibration_allowed("calibration.cancel"))cancel_session_=model.calibration_params("calibration.cancel").value("session_id",std::string());
+    if(!cancel_session_.empty()) {
+      if(sequence_>=4096){drop("Reconnecting at request limit; calibration outcome requires synchronization");return;}
+      request("calibration.cancel",Json{{"session_id",cancel_session_}});
+    }
+    cancel_session_.clear();
+  }
   if(eof){drop("IPC disconnected; last confirmed state is stale");return;}
   if(model.pending() && now>response_deadline_)drop("IPC response timed out; operation outcome unconfirmed");
 }

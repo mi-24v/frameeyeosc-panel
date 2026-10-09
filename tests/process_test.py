@@ -65,6 +65,24 @@ class Processes(unittest.TestCase):
         pidline=self.read(p); self.assertTrue(pidline.startswith("PID "),pidline)
         pid=int(pidline[4:]); self.assertEqual(self.read(p),"READY")
         return pid
+    def test_calibration_methods_and_atomic_profile_result(self):
+        for scenario in ("calibration-skip","calibration-wide","calibration-failed","calibration-cancel","calibration-disconnect","calibration-startfailed"):
+            with self.subTest(scenario=scenario):
+                if Path(self.sock).exists():Path(self.sock).unlink()
+                p=self.launch(scenario,scenario);out,err=p.communicate(timeout=7)
+                self.assertEqual(p.returncode,0,err+out)
+                requests=[json.loads(line) for line in (self.root/"log").read_text().splitlines() if line.startswith("{")]
+                if scenario=="calibration-startfailed":
+                    self.assertEqual(requests,[{"method":"calibration.start","params":{}}])
+                elif scenario=="calibration-cancel":
+                    self.assertEqual(requests,[{"method":"calibration.start","params":{}},{"method":"calibration.cancel","params":{"session_id":"newsession"}}])
+                elif scenario=="calibration-disconnect":
+                    self.assertEqual(requests,[{"method":"calibration.start","params":{}},{"method":"calibration.begin_stage","params":{"session_id":"newsession","stage":"closed"}}])
+                    self.assertEqual((self.root/"log").read_text().count("state.get"),2)
+                else:
+                    final={"method":"calibration.begin_stage","params":{"session_id":"newsession","stage":"wide"}} if scenario=="calibration-wide" else {"method":"calibration.skip_wide","params":{"session_id":"newsession"}}
+                    self.assertEqual(requests,[{"method":"calibration.start","params":{}},{"method":"calibration.begin_stage","params":{"session_id":"newsession","stage":"closed"}},{"method":"calibration.begin_stage","params":{"session_id":"newsession","stage":"relaxed"}},final])
+                (self.root/"log").unlink()
     def test_owned_close_and_config(self):
         p=self.launch(); pid=self.ready(p)
         self.assertTrue(Path(f"/proc/{pid}").exists())

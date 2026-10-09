@@ -39,12 +39,48 @@ int main(int argc, char** argv) {
     IpcClient ipc(argv[3],child);
     auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
     bool patched=false, fresh_again=false;
+    int calibration_stage=0;bool saw_stale=false;
     std::chrono::steady_clock::time_point crashed{};
     std::vector<unsigned char> initial_crash_image;
     DriverRuntime save_runtime;Overlay save_overlay(save_runtime);save_overlay.init();int save_stage=0;
     auto apply_ui=[&] {vr::VREvent_t event{};event.eventType=vr::VREvent_MouseButtonDown;event.data.mouse={650,20,vr::VRMouseButton_Left,0};save_runtime.events.push_back(event);save_overlay.step(ipc,child);};
     while(std::chrono::steady_clock::now()<deadline) {
       child.poll(); ipc.tick();
+      if(mode.rfind("calibration",0)==0) {
+        if(!ipc.model.fresh && calibration_stage>0) {
+          saw_stale=true;
+          if(ipc.model.calibration_allowed("calibration.start") || ipc.model.calibration_allowed("calibration.cancel"))return 20;
+        }
+        if(ipc.model.fresh && !ipc.model.pending()) {
+          const auto cal=ipc.model.state.value("calibration",Json());
+          if(calibration_stage==0) {
+            save_overlay.ui.calibration_page=true;
+            save_runtime.events.push_back(vr::VREvent_t{});
+            auto click=[&](float x){vr::VREvent_t e{};e.eventType=vr::VREvent_MouseButtonDown;e.data.mouse={x,Ui::height-890,vr::VRMouseButton_Left,0};save_runtime.events.push_back(e);};
+            click(30);if(mode=="calibration-cancel" || mode=="calibration-startfailed")click(1000);
+            if(!save_overlay.step(ipc,child) || !ipc.model.pending())return 21;
+            calibration_stage=1;
+          } else if(mode=="calibration-startfailed") {
+            if(cal["session_id"]!="oldsession" || cal["state"]!="completed" || ipc.model.status.find("busy")==std::string::npos)return 27;
+            std::cout<<"failed start did not cancel old terminal session\n";child.stop();return 0;
+          } else if(mode=="calibration-cancel") {
+            if(cal["state"]!="cancelled" || ipc.model.state["active_profile"].is_null())return 22;
+            std::cout<<"pending start cancelled in order\n";child.stop();return 0;
+          } else if(mode=="calibration-disconnect" && ipc.connections()>1) {
+            if(!saw_stale || cal["state"]!="cancelled" || cal["result"]["reason"]!="connection_lost" || ipc.model.state["active_profile"].is_null())return 23;
+            std::cout<<"disconnect reconciled terminal state without replay\n";child.stop();return 0;
+          } else if(cal["state"]=="waiting") {
+            const auto operation=cal["stage"]=="wide" && mode!="calibration-wide"?"calibration.skip_wide":"calibration.begin_stage";
+            if(!ipc.calibrate(operation))return 24;
+            ++calibration_stage;
+          } else if(cal["state"]=="completed" || cal["state"]=="failed") {
+            if(mode=="calibration-failed") {
+              if(cal["state"]!="failed" || cal["result"]["reason"]!="save_failed" || ipc.model.state["active_profile"]["left"]["closed"]!=0.1 || ipc.model.status.find("save_failed")==std::string::npos)return 25;
+            } else if(cal["state"]!="completed" || ipc.model.state["active_profile"]["left"]["closed"]!=0.2)return 26;
+            std::cout<<"calibration stages and applied profile confirmed\n";child.stop();return 0;
+          }
+        }
+      }
       if(mode=="save-ui" && ipc.model.fresh && !ipc.model.pending()) {
         save_overlay.step(ipc,child);
         if(save_stage==0){if(!save_overlay.ui.edit("eyelid_output_cap","0.6",ipc.model))return 11;apply_ui();save_stage=1;}

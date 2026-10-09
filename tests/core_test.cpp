@@ -20,8 +20,8 @@ int main() { try {
   CHECK(m.pending()); CHECK(m.state["settings"]["current"]["eyelid_output_cap"]==1.0);
   m.receive(lines[3]); CHECK(!m.pending()); CHECK(m.state["settings"]["current"]["eyelid_output_cap"]==0.7);
   m.receive(lines[4]); CHECK(m.state==lines[4]["data"]);
-  m.expect("w1", "settings.patch", lines[7]["params"]); m.receive(lines[8]);
-  CHECK(m.status.find("unknown setting")!=std::string::npos); CHECK(m.state["settings"]["current"]["eyelid_output_cap"]==0.7);
+  m.expect("w1", "settings.patch", lines[8]["params"]); m.receive(lines[9]);
+  CHECK(m.status.find("invalid value for eye_widening_margin_left")!=std::string::npos); CHECK(m.state["settings"]["current"]["eyelid_output_cap"]==0.7);
   // Calibration updates must validate the complete contract and never cross instances.
   const Json cause={{"connection_id","p1"},{"request_id","c1"}};
   Json calibration={{"session_id","session1"},{"state","waiting"},{"stage","closed"},{"remaining_ms",0},{"caused_by",cause},{"result",nullptr}};
@@ -37,6 +37,31 @@ int main() { try {
   auto invalid_snapshot=lines[1];invalid_snapshot["result"]["calibration"]=calibration;invalid_snapshot["result"]["calibration"]["caused_by"]="wrong";
   Model invalid;invalid.expect("s1","state.get",Json::object());invalid.receive(invalid_snapshot);CHECK(!invalid.fresh);CHECK(invalid.pending());
   invalid_snapshot=lines[1];invalid_snapshot["result"]["settings"]["current"]["eye_widening"]=1;invalid.receive(invalid_snapshot);CHECK(!invalid.fresh);
+  // Every required field is validated before adopting a replacement snapshot.
+  for(const auto& entry:std::vector<std::pair<std::string,Json>>{{"/settings/current/eye_widening",1},{"/settings/current/eye_widening_margin_left",-0.1},{"/settings/current/min_base_width",1.1},{"/calibration",Json{{"state","waiting"}}},{"/active_profile",Json::object()}}) {
+    Model rejected;rejected.expect("s1","state.get",Json::object());auto bad=lines[1];bad["result"][Json::json_pointer(entry.first)]=entry.second;
+    rejected.receive(bad);CHECK(!rejected.fresh);CHECK(rejected.pending());
+  }
+  event["data"]["calibration"]=calibration;
+  for(const auto& entry:std::vector<std::pair<std::string,Json>>{{"state","unknown"},{"session_id",""},{"stage","natural"},{"remaining_ms",-1},{"remaining_ms",true},{"caused_by",Json::object()},{"result",Json::object()}}) {
+    auto malformed=event;malformed["data"]["calibration"][entry.first]=entry.second;m.receive(malformed);CHECK(m.state==before);
+  }
+  for(const auto& entry:std::vector<std::pair<std::string,int>>{{"preparing",2000},{"measuring",4250}}) {
+    event["data"]["calibration"]=calibration;event["data"]["calibration"]["state"]=entry.first;event["data"]["calibration"]["remaining_ms"]=entry.second;
+    m.receive(event);CHECK(m.state["calibration"]["remaining_ms"]==entry.second);CHECK(m.state["active_profile"].is_null());
+  }
+  auto failed_stage=calibration;failed_stage["stage"]="relaxed";failed_stage["result"]=Json{{"kind","stage_failed"},{"stage","relaxed"},{"reason","invalid_interval"},{"wide_available",nullptr},{"caused_by",cause}};
+  event["data"]["calibration"]=failed_stage;m.receive(event);CHECK(m.calibration_allowed("calibration.begin_stage"));
+  auto profile_unchanged=m.state["active_profile"];
+  for(const std::string terminal:{"completed","cancelled","failed"}) {
+    auto finished=calibration;finished["state"]=terminal;finished["stage"]=nullptr;
+    finished["result"]=Json{{"kind",terminal},{"stage",nullptr},{"reason",terminal=="failed"?Json("save_failed"):Json()},{"wide_available",Json::array({false,true})},{"caused_by",cause}};
+    event["data"]["calibration"]=finished;m.receive(event);CHECK(m.state["calibration"]==finished);CHECK(m.state["active_profile"]==profile_unchanged);CHECK(!m.calibration_allowed("calibration.cancel"));
+    CHECK(m.calibration_allowed("calibration.start"));
+  }
+  auto terminal_state=m.state;auto missing_cause=event;missing_cause.erase("caused_by");m.receive(missing_cause);CHECK(m.state==terminal_state);
+  m.disconnected("lost");m.receive(event);CHECK(!m.fresh);CHECK(m.state==terminal_state);
+  auto reconnected=lines[1];reconnected["result"]["calibration"]=terminal_state["calibration"];m.expect("s1","state.get",Json::object());m.receive(reconnected);CHECK(m.fresh);CHECK(m.state["calibration"]["state"]=="failed");
   m.receive(lines[4]);
   auto saved=m.state; m.receive(Json{{"v",2},{"type","event"},{"event","state.changed"},{"data",Json::object()}}); CHECK(m.state==saved);
   m.disconnected("lost"); CHECK(!m.fresh); CHECK(m.state==saved); CHECK(!m.pending());
@@ -83,6 +108,60 @@ int main() { try {
   CHECK((save_ui.patch(save_model)==Json{{"prefix","/OnlyPrefix"}}));
   Ui cli_ui;CHECK(cli_ui.edit("prefix","/FT",save_model));cli_ui.save=true;
   CHECK((cli_ui.patch(save_model)==Json{{"prefix","/FT"}}));
+  Ui calibration_ui;
+  CHECK(calibration_ui.click(1100,35,m)=="page");
+  for(size_t row=0;row<Ui::calibration_fields.size();++row) {
+    const float top=Ui::rows_top+row*Ui::row_height;const auto previous=calibration_ui.patch(m);
+    for(const auto& point:std::vector<std::pair<float,float>>{{15,top+5},{Ui::width-16,top+5},{30,top+Ui::row_height-3},{30,top+Ui::row_height-1}}) {
+      CHECK(calibration_ui.click(point.first,point.second,m).empty());CHECK(calibration_ui.patch(m)==previous);
+    }
+  }
+  for(const auto& point:std::vector<std::pair<float,float>>{{15,890},{300,890},{319,890},{640,890},{659,890},{950,890},{969,890},{1424,890},{30,874},{30,925}})CHECK(calibration_ui.click(point.first,point.second,m).empty());
+  CHECK(calibration_ui.click(30,Ui::rows_top+5,m)=="changed");
+  CHECK(calibration_ui.patch(m)["eye_widening"]==false);
+  CHECK(calibration_ui.edit("eye_widening_margin_left","0.2",m));
+  CHECK(calibration_ui.edit("eye_widening_margin_right","0",m));
+  CHECK(!calibration_ui.edit("eye_widening_margin_left","-1",m));
+  CHECK(!calibration_ui.edit("min_base_width","0",m));
+  CHECK(!calibration_ui.edit("min_wide_width","1.01",m));
+  CHECK(calibration_ui.edit("min_wide_width","1",m));
+  CHECK(calibration_ui.click(30,890,m)=="calibration.start");
+  m.state["calibration"]=calibration;
+  CHECK(calibration_ui.click(350,890,m)=="calibration.begin_stage");
+  CHECK(calibration_ui.click(700,890,m).empty());
+  CHECK(calibration_ui.click(1000,890,m)=="calibration.cancel");
+  m.state["calibration"]["stage"]="wide";
+  CHECK(calibration_ui.click(700,890,m)=="calibration.skip_wide");
+  m.state["calibration"]["state"]="measuring";m.state["calibration"]["remaining_ms"]=5000;
+  CHECK(calibration_ui.click(350,890,m).empty());
+  m.expect("pending","calibration.begin_stage",Json{{"session_id","session1"},{"stage","wide"}});
+  CHECK(calibration_ui.click(1000,890,m)=="calibration.cancel");
+  CHECK(calibration_ui.click(350,890,m).empty());
+  CHECK((m.calibration_params("calibration.begin_stage")==Json{{"session_id","session1"},{"stage","wide"}}));
+  m.state["calibration"]["state"]="completed";m.state["calibration"]["stage"]=nullptr;m.state["calibration"]["remaining_ms"]=0;
+  m.expect("newstart","calibration.start",Json::object());
+  CHECK(m.calibration_allowed("calibration.cancel"));
+  CHECK(m.calibration_params("calibration.cancel").empty());
+  auto calibration_pixels=calibration_ui.render(m,"running");
+  m.disconnected("lost");CHECK(calibration_ui.click(1000,890,m).empty());
+  CHECK(!calibration_ui.edit("eye_widening_margin_left","0.3",m));
+  CHECK(calibration_ui.click(1000,35,m)=="page");
+  CHECK(calibration_ui.render(m,"running")!=calibration_pixels);
+  m.expect("s1","state.get",Json::object());m.receive(lines[1]);
+  calibration_ui.calibration_page=true;
+  auto no_profile=calibration_ui.render(m,"running");m.receive(lines.back());
+  CHECK(!m.state["active_profile"].is_null());CHECK(calibration_ui.render(m,"running")!=no_profile);
+  auto applied_profile=m.state["active_profile"];
+  auto precise=m;precise.state["active_profile"]["left"]["d"]=0.15000000000000002;
+  CHECK(calibration_ui.render(precise,"running")==calibration_ui.render(m,"running"));
+  m.expect("savefailure","calibration.skip_wide",Json{{"session_id","session1"}});
+  auto failed=calibration;failed["state"]="failed";failed["stage"]=nullptr;
+  failed["result"]=Json{{"kind","failed"},{"stage",nullptr},{"reason","save_failed"},{"wide_available",nullptr},{"caused_by",cause}};
+  m.receive(Json{{"v",1},{"type","response"},{"id","savefailure"},{"ok",false},{"result",Json{{"calibration",failed},{"save","failed"}}},{"error",Json{{"code","save_failed"},{"message","disk full"}}}});
+  CHECK(!m.pending());CHECK(m.state["active_profile"]==applied_profile);CHECK(m.status.find("disk full")!=std::string::npos);
+  auto failed_pixels=calibration_ui.render(m,"running");m.state["calibration"]["state"]="waiting";m.state["calibration"]["stage"]="relaxed";m.state["calibration"]["result"]["kind"]="stage_failed";m.state["calibration"]["result"]["stage"]="relaxed";m.state["calibration"]["result"]["reason"]="invalid_interval";
+  CHECK(calibration_ui.render(m,"running")!=failed_pixels);CHECK(m.calibration_allowed("calibration.begin_stage"));
+  m.expect("s1","state.get",Json::object());m.receive(lines[1]);
   auto pixels=ui.render(m,"running"); CHECK(pixels.size()==Ui::width*Ui::height*4);
   auto long_model=m;long_model.state["settings"]["current"]["prefix"]="/"+std::string(100,'x');
   auto clipped=ui.render(long_model,"running");
