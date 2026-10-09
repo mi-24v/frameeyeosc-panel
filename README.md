@@ -108,9 +108,13 @@ values stay valid and appear clipped; editing replaces them with a value within
 this keyboard limit. Non-ASCII glyphs currently appear as `?`. Local type/range checks show an error; the backend remains authoritative
 for candidate validation, resource preparation and saving. Snapshot updates
 never overwrite an active draft. Keyboard results are accepted only for this
-overlay and the matching request token. Global keyboard cancellation uses the
-SDK-owned overlay handle after its opened event; Close remains available while
-the keyboard is open. A keyboard-open failure is shown.
+overlay and the matching request token. Nonzero-token Close notifications use
+the request token even if Opened was not received; tokenless Close notifications
+require a matching overlay's Opened notification. After Close, the panel waits
+up to 250ms for Done from another event queue. During this grace period, up to
+64 clicks other than Close are deferred and replayed after Done or the deadline;
+the 65th and later clicks are dropped. Close is always processed immediately.
+A keyboard-open failure is shown.
 
 Toggle **Save**, then **Apply changes** to send only selected fields. A Save:false
 trial retains selected unsaved drafts, so Save:true can persist them even when
