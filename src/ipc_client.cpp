@@ -82,7 +82,7 @@ bool Model::calibration_allowed(const std::string& method) const {
   if(!fresh)return false;
   const auto c=state.value("calibration",Json());
   const bool active=c.is_object() && (c["state"]=="waiting" || c["state"]=="preparing" || c["state"]=="measuring");
-  if(method=="calibration.cancel")return active || (pending() && method_=="calibration.start");
+  if(method=="calibration.cancel")return !(pending() && method_=="calibration.cancel") && (active || (pending() && method_=="calibration.start"));
   if(pending())return false;
   if(method=="calibration.start")return !active;
   if(method=="calibration.begin_stage")return active && c["state"]=="waiting";

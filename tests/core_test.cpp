@@ -138,6 +138,8 @@ int main() { try {
   CHECK(calibration_ui.click(1000,890,m)=="calibration.cancel");
   CHECK(calibration_ui.click(350,890,m).empty());
   CHECK((m.calibration_params("calibration.begin_stage")==Json{{"session_id","session1"},{"stage","wide"}}));
+  m.expect("cancelling","calibration.cancel",Json{{"session_id","session1"}});
+  CHECK(calibration_ui.click(1000,890,m).empty());
   m.state["calibration"]["state"]="completed";m.state["calibration"]["stage"]=nullptr;m.state["calibration"]["remaining_ms"]=0;
   m.expect("newstart","calibration.start",Json::object());
   CHECK(m.calibration_allowed("calibration.cancel"));
