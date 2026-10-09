@@ -229,7 +229,7 @@ bool Overlay::step(IpcClient& ipc,OwnedChild& child) {
 bool Overlay::step(Model& model,const std::string& backend,const std::function<bool(const Json&,bool)>& submit) {
   auto failed_image=[&](vr::VROverlayHandle_t handle,const std::string& detail) {
     auto& image=handle==handle_?main_image_:thumb_image_;
-    image.signature.clear();image.retry_after=std::chrono::steady_clock::now()+std::chrono::milliseconds(250);
+    image.signature.clear();image.retry_after=runtime_->now()+std::chrono::milliseconds(250);
     if(image.failures<3) {
       ++image.failures;
       image.error=(handle==handle_?"Dashboard":"Thumbnail")+std::string(" image failed: ")+detail+(image.failures>=3?"; retries exhausted; relaunch manually":"; retry pending");
@@ -254,7 +254,7 @@ bool Overlay::step(Model& model,const std::string& backend,const std::function<b
     if(((e.eventType==vr::VREvent_KeyboardClosed_Global && e.data.keyboard.overlayHandle==handle_) || (e.eventType==vr::VREvent_KeyboardClosed && own_queue && queue_handle==handle_)) && !keyboard_key_.empty() && (e.data.keyboard.uUserValue?matching_token:keyboard_opened_) && !keyboard_closing_token_) {
       // Separate queues can deliver Done in a later step, including beyond the poll limit.
       keyboard_closing_token_=keyboard_token_;
-      keyboard_close_deadline_=std::chrono::steady_clock::now()+std::chrono::milliseconds(250);
+      keyboard_close_deadline_=runtime_->now()+std::chrono::milliseconds(250);
     }
     if(e.eventType==vr::VREvent_MouseButtonDown && own_queue && queue_handle==handle_ && e.data.mouse.button==vr::VRMouseButton_Left) {
       // SDK mouse origin is bottom-left; the CPU canvas uses top-left.
@@ -284,7 +284,7 @@ bool Overlay::step(Model& model,const std::string& backend,const std::function<b
   for(unsigned i=0;i<64 && runtime_->poll(EventOrigin::System,handle_,e);++i)if(!event(e,EventOrigin::System,0))return false;
   for(unsigned i=0;i<64 && runtime_->poll(EventOrigin::OwnedOverlay,handle_,e);++i)if(!event(e,EventOrigin::OwnedOverlay,handle_))return false;
   for(unsigned i=0;i<64 && runtime_->poll(EventOrigin::OwnedOverlay,thumbnail_,e);++i)if(!event(e,EventOrigin::OwnedOverlay,thumbnail_))return false;
-  if(keyboard_closing_token_ && (keyboard_key_.empty() || std::chrono::steady_clock::now()>=keyboard_close_deadline_)) {
+  if(keyboard_closing_token_ && (keyboard_key_.empty() || runtime_->now()>=keyboard_close_deadline_)) {
     if(keyboard_closing_token_==keyboard_token_) {keyboard_key_.clear();keyboard_opened_=false;}
     keyboard_closing_token_=0;
     auto clicks=std::move(keyboard_deferred_clicks_);keyboard_deferred_clicks_.clear();
@@ -294,7 +294,7 @@ bool Overlay::step(Model& model,const std::string& backend,const std::function<b
   ui.confirmed(model);
   ui.image_status=main_image_.error;
   if(!thumb_image_.error.empty())ui.image_status+=(ui.image_status.empty()?"":"; ")+thumb_image_.error;
-  const auto now=std::chrono::steady_clock::now();
+  const auto now=runtime_->now();
   if(runtime_->visible(handle_) && main_image_.failures<3 && now>=main_image_.retry_after) {
     const std::string signature=model.state.dump()+model.status+backend+ui.patch(model).dump()+std::to_string(ui.revision())+ui.error+ui.image_status+(ui.save?"save":"nosave")+(model.fresh?"fresh":"stale");
     if(signature!=main_image_.signature) {

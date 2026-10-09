@@ -5,6 +5,7 @@
 #include <memory>
 #include <functional>
 #include <vector>
+#include <chrono>
 namespace panel {
 enum class EventOrigin {System, OwnedOverlay};
 bool ends_session(uint32_t event,EventOrigin origin,vr::VROverlayHandle_t event_handle,vr::VROverlayHandle_t own_handle);
@@ -27,6 +28,7 @@ public:
 class OverlayRuntime {
 public:
   virtual ~OverlayRuntime()=default;
+  virtual std::chrono::steady_clock::time_point now(){return std::chrono::steady_clock::now();}
   virtual void init(vr::VROverlayHandle_t& main,vr::VROverlayHandle_t& thumb)=0;
   virtual void shutdown(vr::VROverlayHandle_t main,vr::VROverlayHandle_t thumb)=0;
   virtual bool poll(EventOrigin origin,vr::VROverlayHandle_t handle,vr::VREvent_t& event)=0;
