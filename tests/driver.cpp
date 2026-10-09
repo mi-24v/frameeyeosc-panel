@@ -61,8 +61,8 @@ int main(int argc, char** argv) {
             if(!save_overlay.step(ipc,child) || !ipc.model.pending())return 21;
             calibration_stage=1;
           } else if(mode=="calibration-startfailed") {
-            if(cal["session_id"]!="oldsession" || cal["state"]!="completed" || ipc.model.status.find("busy")==std::string::npos)return 27;
-            std::cout<<"failed start did not cancel old terminal session\n";child.stop();return 0;
+            if(cal["session_id"]!="other-active" || cal["state"]!="waiting" || ipc.model.status.find("busy")==std::string::npos)return 27;
+            std::cout<<"failed start did not cancel another active session\n";child.stop();return 0;
           } else if(mode=="calibration-cancel") {
             if(cal["state"]!="cancelled" || ipc.model.state["active_profile"].is_null())return 22;
             std::cout<<"pending start cancelled in order\n";child.stop();return 0;

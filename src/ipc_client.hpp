@@ -5,7 +5,7 @@
 namespace panel {
 using Json=nlohmann::json;
 class Model {
-  std::string id_, method_;
+  std::string id_, method_, accepted_start_session_, previous_start_session_;
   Json params_;
 public:
   Json state=Json::object();
@@ -18,6 +18,7 @@ public:
   void receive(const Json& message);
   void disconnected(const std::string& reason);
   bool pending() const {return !id_.empty();}
+  const std::string& accepted_start_session() const {return accepted_start_session_;}
 };
 class IpcClient {
   const std::string path_;

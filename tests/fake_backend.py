@@ -60,6 +60,8 @@ while True:
                     if method=="calibration.start":
                         if params!={}:raise ValueError("start params")
                         if scenario=="calibration-startfailed":
+                            cal={"session_id":"other-active","state":"waiting","stage":"closed","remaining_ms":0,"caused_by":{"connection_id":"another-owner","request_id":"start"},"result":None}
+                            state["calibration"]=cal
                             conn.sendall(json.dumps({"v":1,"type":"response","id":request["id"],"ok":False,"result":{"calibration":cal,"save":"not_requested"},"error":{"code":"busy","message":"cannot start"}}).encode()+b"\n")
                             continue
                         cal={"session_id":"newsession","state":"waiting","stage":"closed","remaining_ms":0,"caused_by":cause,"result":None}

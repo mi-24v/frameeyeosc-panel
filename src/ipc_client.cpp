@@ -98,9 +98,15 @@ Json Model::calibration_params(const std::string& method) const {
   return params;
 }
 void Model::expect(const std::string& id,const std::string& method,const Json& params) {
+  accepted_start_session_.clear();previous_start_session_.clear();
+  if(method=="calibration.start") {
+    const auto previous=state.value("calibration",Json());
+    if(previous.is_object())previous_start_session_=previous.value("session_id",std::string());
+  }
   reconnect_requested=false;id_=id;method_=method;params_=params;status=method=="state.get"?"Synchronizing actual state":"Pending backend response";
 }
 void Model::disconnected(const std::string& reason) {
+  accepted_start_session_.clear();previous_start_session_.clear();
   reconnect_requested=false;status=reason+(pending()?"; operation outcome unconfirmed":"");fresh=false;id_.clear();method_.clear();params_=Json::object();
 }
 void Model::receive(const Json& j) {
@@ -126,6 +132,11 @@ void Model::receive(const Json& j) {
   }
   else if(method_.find("calibration.")==0 && (ok || !result.empty())) {
     if(!result.contains("calibration") || !calibration(result["calibration"]) || !save_result(result))return;
+    if(ok && result["calibration"].is_null())return;
+    if(method_=="calibration.start" && ok) {
+      const auto session=result["calibration"]["session_id"].get<std::string>();
+      if(session!=previous_start_session_)accepted_start_session_=session;
+    }
     state["calibration"]=result["calibration"];
   }
   reconnect_requested=!ok && (method_=="state.get" || j["error"]["code"]=="request_limit");
@@ -235,7 +246,7 @@ void IpcClient::tick() {
   if(input_.find('\n')==std::string::npos && input_.size()>=line_limit){drop("IPC line exceeds 1 MiB");return;}
   if(cancel_queued_ && !model.pending()) {
     cancel_queued_=false;
-    if(cancel_session_.empty() && model.calibration_allowed("calibration.cancel"))cancel_session_=model.calibration_params("calibration.cancel").value("session_id",std::string());
+    if(cancel_session_.empty())cancel_session_=model.accepted_start_session();
     if(!cancel_session_.empty()) {
       if(sequence_>=4096){drop("Reconnecting at request limit; calibration outcome requires synchronization");return;}
       request("calibration.cancel",Json{{"session_id",cancel_session_}});
