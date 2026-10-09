@@ -15,33 +15,66 @@ constexpr size_t request_limit=64*1024;
 constexpr size_t line_limit=1024*1024;
 bool settings(const Json& value,bool full) {
   if(!value.is_object()) return false;
-  for(const char* key:{"eyelid_output_cap","prefix","one_euro","one_euro_min_cutoff","one_euro_beta","one_euro_d_cutoff","target_mode","target_host","target_port","shm_version"}) {
+  for(const char* key:{"eye_widening","eye_widening_margin_left","eye_widening_margin_right","min_base_width","min_wide_width","eyelid_output_cap","prefix","one_euro","one_euro_min_cutoff","one_euro_beta","one_euro_d_cutoff","target_mode","target_host","target_port","shm_version"}) {
     if(!value.contains(key)) {if(full) return false; else continue;}
     const auto& item=value[key]; const std::string name=key;
-    if(name=="one_euro") {if(!item.is_boolean()) return false;}
+    if(name=="one_euro" || name=="eye_widening") {if(!item.is_boolean()) return false;}
     else if(name=="target_port") {if(!item.is_number_integer() || item<1 || item>65535) return false;}
-    else if(name=="eyelid_output_cap" || name.find("one_euro_")==0) {
+    else if(name=="eyelid_output_cap" || name.find("one_euro_")==0 || name.find("eye_widening_margin_")==0 || name=="min_base_width" || name=="min_wide_width") {
       if(!item.is_number()) return false;
       const double number=item.get<double>(); if(!std::isfinite(number)) return false;
       if(name=="eyelid_output_cap" && (number<0 || number>1)) return false;
-      if(name=="one_euro_beta" && number<0) return false;
-      if((name=="one_euro_min_cutoff" || name=="one_euro_d_cutoff") && number<=0) return false;
+      if((name=="one_euro_beta" || name.find("eye_widening_margin_")==0) && number<0) return false;
+      if((name=="one_euro_min_cutoff" || name=="one_euro_d_cutoff" || name=="min_base_width" || name=="min_wide_width") && number<=0) return false;
     } else if(!item.is_string()) return false;
   }
   return true;
 }
 bool sources(const Json& j) {
   if(!j.is_object()) return false;
-  for(const char* key:{"eyelid_output_cap","prefix","one_euro","one_euro_min_cutoff","one_euro_beta","one_euro_d_cutoff","target_mode","target_host","target_port","shm_version"}) if(!j.contains(key)||!j[key].is_string()) return false;
+  for(const char* key:{"eye_widening","eye_widening_margin_left","eye_widening_margin_right","min_base_width","min_wide_width","eyelid_output_cap","prefix","one_euro","one_euro_min_cutoff","one_euro_beta","one_euro_d_cutoff","target_mode","target_host","target_port","shm_version"}) if(!j.contains(key)||!j[key].is_string() || (j[key]!="cli" && j[key]!="saved" && j[key]!="default" && j[key]!="panel")) return false;
   return true;
 }
 bool target_output(const Json& j) {
   return j.contains("osc_target") && (j["osc_target"].is_null()||j["osc_target"].is_string()) && j.contains("output") && j["output"].is_object() && j["output"].contains("state") && j["output"]["state"].is_string() && j["output"].contains("reason") && (j["output"]["reason"].is_null()||j["output"]["reason"].is_string());
 }
+bool nullable_string(const Json& j) {return j.is_null() || j.is_string();}
+bool cause(const Json& j) {
+  return j.is_null() || (j.is_object() && j.contains("connection_id") && j["connection_id"].is_string() && !j["connection_id"].get<std::string>().empty() && j.contains("request_id") && j["request_id"].is_string() && !j["request_id"].get<std::string>().empty());
+}
+bool stage(const Json& j) {return j=="closed" || j=="relaxed" || j=="wide";}
+bool calibration(const Json& j) {
+  if(j.is_null())return true;
+  if(!j.is_object() || !j.contains("session_id") || !j["session_id"].is_string() || j["session_id"].get<std::string>().empty() || !j.contains("state") || !j.contains("stage") || !j.contains("remaining_ms") || !j["remaining_ms"].is_number_integer() || j["remaining_ms"]<0 || !j.contains("caused_by") || !cause(j["caused_by"]) || !j.contains("result"))return false;
+  const bool active=j["state"]=="waiting" || j["state"]=="preparing" || j["state"]=="measuring";
+  const bool terminal=j["state"]=="completed" || j["state"]=="cancelled" || j["state"]=="failed";
+  if((!active && !terminal) || (active && !stage(j["stage"])) || (terminal && !j["stage"].is_null()) || ((terminal || j["state"]=="waiting") && j["remaining_ms"]!=0))return false;
+  const auto& r=j["result"];
+  if(r.is_null())return true;
+  if(!r.is_object() || !r.contains("kind") || (r["kind"]!="stage_completed" && r["kind"]!="stage_failed" && r["kind"]!="completed" && r["kind"]!="cancelled" && r["kind"]!="failed") || !r.contains("stage") || (!r["stage"].is_null() && !stage(r["stage"])) || !r.contains("reason") || !nullable_string(r["reason"]) || !r.contains("caused_by") || !cause(r["caused_by"]) || !r.contains("wide_available"))return false;
+  const auto& wide=r["wide_available"];
+  return wide.is_null() || (wide.is_array() && wide.size()==2 && wide[0].is_boolean() && wide[1].is_boolean());
+}
+bool profile(const Json& j) {
+  if(j.is_null())return true;
+  if(!j.is_object())return false;
+  for(const char* side:{"left","right"}) {
+    if(!j.contains(side) || !j[side].is_object())return false;
+    const auto& eye=j[side];
+    for(const char* key:{"closed","relaxed","relaxed_max","wide","d","wide_start"}) {
+      if(!eye.contains(key))return false;
+      if(std::string(key)=="wide" && eye[key].is_null())continue;
+      if(!eye[key].is_number() || !std::isfinite(eye[key].get<double>()))return false;
+    }
+    if(!eye.contains("wide_available") || !eye["wide_available"].is_boolean() || !eye.contains("wide_unavailable_reason") || !nullable_string(eye["wide_unavailable_reason"]))return false;
+  }
+  return true;
+}
+bool save_result(const Json& j) {return j.contains("save") && (j["save"]=="saved" || j["save"]=="not_requested" || j["save"]=="failed");}
 bool snapshot(const Json& j) {
   if(!j.is_object() || !j.contains("settings") || !j["settings"].is_object()) return false;
   const auto& s=j["settings"];
-  return s.contains("current")&&settings(s["current"],true)&&s.contains("saved")&&settings(s["saved"],false)&&s.contains("sources")&&sources(s["sources"])&&j.contains("instance_id")&&j["instance_id"].is_string()&&j.contains("connection_id")&&j["connection_id"].is_string()&&j.contains("tracking")&&j["tracking"].is_string()&&j.contains("stream")&&j["stream"].is_object()&&j["stream"].contains("state")&&j["stream"]["state"].is_string()&&j["stream"].contains("peer")&&(j["stream"]["peer"].is_null()||j["stream"]["peer"].is_string())&&target_output(j);
+  return s.contains("current")&&settings(s["current"],true)&&s.contains("saved")&&settings(s["saved"],false)&&s.contains("sources")&&sources(s["sources"])&&j.contains("instance_id")&&j["instance_id"].is_string()&&j.contains("connection_id")&&j["connection_id"].is_string()&&j.contains("tracking")&&j["tracking"].is_string()&&j.contains("stream")&&j["stream"].is_object()&&j["stream"].contains("state")&&j["stream"]["state"].is_string()&&j["stream"].contains("peer")&&(j["stream"]["peer"].is_null()||j["stream"]["peer"].is_string())&&target_output(j)&&j.contains("active_profile")&&profile(j["active_profile"])&&j.contains("calibration")&&calibration(j["calibration"]);
 }
 }
 void Model::expect(const std::string& id,const std::string& method,const Json& params) {
@@ -53,7 +86,11 @@ void Model::disconnected(const std::string& reason) {
 void Model::receive(const Json& j) {
   if(!j.is_object() || !j.contains("v") || !j["v"].is_number_integer() || j["v"]!=1 || !j.contains("type") || !j["type"].is_string()) return;
   if(j["type"]=="event") {
-    if(fresh && j.contains("event") && j["event"]=="state.changed" && j.contains("data") && snapshot(j["data"])) state=j["data"];
+    if(!fresh || !j.contains("event") || !j.contains("data") || !j.contains("caused_by") || !cause(j["caused_by"]))return;
+    const auto& data=j["data"];
+    if(!data.is_object() || !data.contains("instance_id") || data["instance_id"]!=state["instance_id"])return;
+    if(j["event"]=="state.changed" && snapshot(data))state=data;
+    else if(j["event"]=="calibration.changed" && data.contains("calibration") && calibration(data["calibration"]))state["calibration"]=data["calibration"];
     return;
   }
   if(j["type"]!="response" || !pending() || !j.contains("id") || !j["id"].is_string() || j["id"]!=id_ || !j.contains("ok") || !j["ok"].is_boolean() || !j.contains("result") || !j["result"].is_object() || !j.contains("error")) return;
@@ -62,13 +99,17 @@ void Model::receive(const Json& j) {
   if(method_=="state.get") {
     if(ok) {if(!snapshot(result)) return; state=result;fresh=true;}
   } else if(method_=="settings.patch" && (ok || !result.empty())) {
-    if(!result.contains("current") || !settings(result["current"],true) || !result.contains("sources") || !sources(result["sources"]) || !target_output(result) || !result.contains("save") || !result["save"].is_string()) return;
+    if(!result.contains("current") || !settings(result["current"],true) || !result.contains("sources") || !sources(result["sources"]) || !target_output(result) || !save_result(result)) return;
     state["settings"]["current"]=result["current"];state["settings"]["sources"]=result["sources"];
     state["osc_target"]=result["osc_target"];state["output"]=result["output"];
     if(ok && result["save"]=="saved") for(auto it=params_["patch"].begin();it!=params_["patch"].end();++it) state["settings"]["saved"][it.key()]=result["current"][it.key()];
   }
+  else if(method_.find("calibration.")==0 && (ok || !result.empty())) {
+    if(!result.contains("calibration") || !calibration(result["calibration"]) || !save_result(result))return;
+    state["calibration"]=result["calibration"];
+  }
   reconnect_requested=!ok && (method_=="state.get" || j["error"]["code"]=="request_limit");
-  status=ok?(method_=="settings.patch"?"Applied; save: "+result["save"].get<std::string>():"Actual state confirmed"):"Error: "+j["error"]["code"].get<std::string>()+": "+j["error"]["message"].get<std::string>();
+  status=ok?(method_=="settings.patch"?"Applied; save: "+result["save"].get<std::string>():method_.find("calibration.")==0?"Operation accepted; actual calibration state confirmed":"Actual state confirmed"):"Error: "+j["error"]["code"].get<std::string>()+": "+j["error"]["message"].get<std::string>();
   id_.clear();method_.clear();params_=Json::object();
 }
 IpcClient::~IpcClient(){if(fd_>=0) close(fd_);}

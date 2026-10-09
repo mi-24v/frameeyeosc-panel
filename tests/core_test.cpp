@@ -22,6 +22,22 @@ int main() { try {
   m.receive(lines[4]); CHECK(m.state==lines[4]["data"]);
   m.expect("w1", "settings.patch", lines[7]["params"]); m.receive(lines[8]);
   CHECK(m.status.find("unknown setting")!=std::string::npos); CHECK(m.state["settings"]["current"]["eyelid_output_cap"]==0.7);
+  // Calibration updates must validate the complete contract and never cross instances.
+  const Json cause={{"connection_id","p1"},{"request_id","c1"}};
+  Json calibration={{"session_id","session1"},{"state","waiting"},{"stage","closed"},{"remaining_ms",0},{"caused_by",cause},{"result",nullptr}};
+  m.expect("c1","calibration.start",Json::object());
+  m.receive(Json{{"v",1},{"type","response"},{"id","c1"},{"ok",true},{"result",Json{{"calibration",calibration},{"save","not_requested"}}},{"error",nullptr}});
+  CHECK(!m.pending());CHECK(m.state["calibration"]==calibration);
+  auto event=Json{{"v",1},{"type","event"},{"event","calibration.changed"},{"data",Json{{"instance_id","i-fixture"},{"calibration",calibration}}},{"caused_by",cause}};
+  event["data"]["calibration"]["state"]="preparing";event["data"]["calibration"]["remaining_ms"]=2000;
+  m.receive(event);CHECK(m.state["calibration"]["state"]=="preparing");
+  auto before=m.state;event["data"]["instance_id"]="other";m.receive(event);CHECK(m.state==before);
+  event["data"]["instance_id"]="i-fixture";event["data"]["calibration"]["remaining_ms"]=2.5;m.receive(event);CHECK(m.state==before);
+  auto stale_snapshot=lines[4];stale_snapshot["data"]["instance_id"]="other";m.receive(stale_snapshot);CHECK(m.state==before);
+  auto invalid_snapshot=lines[1];invalid_snapshot["result"]["calibration"]=calibration;invalid_snapshot["result"]["calibration"]["caused_by"]="wrong";
+  Model invalid;invalid.expect("s1","state.get",Json::object());invalid.receive(invalid_snapshot);CHECK(!invalid.fresh);CHECK(invalid.pending());
+  invalid_snapshot=lines[1];invalid_snapshot["result"]["settings"]["current"]["eye_widening"]=1;invalid.receive(invalid_snapshot);CHECK(!invalid.fresh);
+  m.receive(lines[4]);
   auto saved=m.state; m.receive(Json{{"v",2},{"type","event"},{"event","state.changed"},{"data",Json::object()}}); CHECK(m.state==saved);
   m.disconnected("lost"); CHECK(!m.fresh); CHECK(m.state==saved); CHECK(!m.pending());
   m.expect("s1", "state.get", Json::object()); m.receive(lines[1]);
