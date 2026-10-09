@@ -13,7 +13,7 @@ int main(int argc,char** argv) {
   for(int i=1;i<argc;++i) {
     const std::string arg=argv[i];
     if(arg=="--help") {
-      std::cout<<"FrameEyeOSC Panel 0.1.0\nUsage: frameeyeosc-panel --backend PATH --control-socket PATH [--config PATH]\n\nOwns one backend child; same socket/config and --panel-mode are passed to it.\nClose stops the owned backend; relaunch manually. Existing backends on the same socket are refused; stop legacy/different-socket instances manually.\nBackend must be a direct executable or an exec-replacing wrapper (same PID).\nDashboard hiding and stream disconnection keep the panel resident.\nCalibration unavailable in this build.\n";return 0;
+      std::cout<<"FrameEyeOSC Panel 0.1.0\nUsage: frameeyeosc-panel --backend PATH --control-socket PATH [--config PATH]\n\nOwns one backend child; same socket/config and --panel-mode are passed to it.\nClose stops the owned backend; relaunch manually. Existing backends on the same socket are refused; stop legacy/different-socket instances manually.\nBackend must be a direct executable or an exec-replacing wrapper (same PID).\nDashboard hiding and stream disconnection keep the panel resident.\nManual calibration: start each closed/natural/wide stage; skip optional wide or cancel an active session.\n";return 0;
     }
     if(arg=="--version"){std::cout<<"0.1.0\n";return 0;}
     if((arg!="--backend" && arg!="--control-socket" && arg!="--config") || i+1>=argc){std::cerr<<"Invalid arguments; use --help\n";return 2;}
