@@ -27,6 +27,20 @@ failure and SIGTERM-to-SIGKILL escalation. They never initialize OpenVR or use
 an HMD. The frozen `tests/fixtures/ipc-v1.jsonl` includes the complete settings schema,
 calibration state/results and applied profiles. Comparisons parse JSON; key order and whitespace are irrelevant.
 
+The optional `actual-backend` CTest runs the compiled panel IPC client against
+an existing Rust backend executable without invoking Cargo or reading Rust
+sources. It is skipped when `FRAMEEYEOSC_BACKEND` is unset. To run it:
+
+```sh
+FRAMEEYEOSC_BACKEND=/absolute/path/to/frameeyeosc ctest --test-dir build -R actual-backend --output-on-failure
+```
+
+It uses a temporary private socket/config and an owned child to check settings
+patch/save, queued Start/Cancel, rejection of a Start while a different
+connection owns an active session, manual Begin, and actual connection closure
+followed by a fresh snapshot with `connection_lost`. The competing session must
+remain active after the rejected Start's queued Cancel. No HMD is initialized.
+
 CMake selects the official `linux64` library on x86_64 and `linuxarm64` on
 AArch64. For a cross build, supply an actual AArch64 compiler/toolchain. An
 optional `-DOPENVR_LIBRARY=/absolute/path/to/libopenvr_api.so` can select the
