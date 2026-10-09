@@ -138,9 +138,7 @@ and retry while visible at 250 ms intervals, up to three consecutive failures;
 stderr and the dashboard show the failure. Relaunch manually after exhaustion.
 The main bitmap is 1440x1080 RGBA (6,220,800 bytes); its acceptance by an actual
 runtime remains unverified. The separate thumbnail is 256x128 RGBA.
-No OpenGL/UI framework is required. Calibration is
-shown as **Calibration unavailable in this build**. No calibration buttons,
-profiles, widening/margin controls or numeric calibration defaults are supplied.
+No OpenGL/UI framework is required.
 
 ## Manual calibration
 
@@ -156,7 +154,9 @@ a rejected Start does not cancel a previous terminal session.
 
 The applied left/right measurements, natural maximum, derived `d` and
 `wide_start`, wide availability and unavailable reason are shown independently
-from the candidate calibration. State/results retain their `caused_by` IDs.
+from the candidate calibration. Waiting stages show the next eye pose and
+button action. State/results retain their `caused_by` IDs for IPC tracing; raw
+connection/request IDs are not shown in the dashboard.
 A stage failure returns to the same waiting stage for manual retry. For an
 invalid natural interval, retry natural opening; to remeasure closed eyes,
 Cancel and Start again. Saving failure shows `failed`/`save_failed` and retains
