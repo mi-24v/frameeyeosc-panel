@@ -154,6 +154,17 @@ int main() { try {
   auto no_profile=calibration_ui.render(m,"running");m.receive(lines.back());
   CHECK(!m.state["active_profile"].is_null());CHECK(calibration_ui.render(m,"running")!=no_profile);
   auto applied_profile=m.state["active_profile"];
+  auto traced=m;traced.state["calibration"]["caused_by"]=Json{{"connection_id","other-connection"},{"request_id","other-request"}};
+  traced.state["calibration"]["result"]["caused_by"]=traced.state["calibration"]["caused_by"];
+  CHECK(calibration_ui.render(traced,"running")==calibration_ui.render(m,"running"));
+  std::vector<unsigned char> previous_instruction;
+  for(const std::string waiting_stage:{"closed","relaxed","wide"}) {
+    auto waiting=m;waiting.state["calibration"]["state"]="waiting";waiting.state["calibration"]["stage"]=waiting_stage;
+    const auto rendered=calibration_ui.render(waiting,"running");
+    const std::vector<unsigned char> instruction(rendered.begin()+790*Ui::width*4,rendered.begin()+810*Ui::width*4);
+    if(!previous_instruction.empty())CHECK(instruction!=previous_instruction);
+    previous_instruction=instruction;
+  }
   auto precise=m;precise.state["active_profile"]["left"]["d"]=0.15000000000000002;
   CHECK(calibration_ui.render(precise,"running")==calibration_ui.render(m,"running"));
   m.expect("savefailure","calibration.skip_wide",Json{{"session_id","session1"}});

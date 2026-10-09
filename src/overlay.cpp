@@ -204,9 +204,12 @@ std::vector<unsigned char> Ui::render(const Model& m,const std::string& backend)
       const auto& result=cal["result"];
       if(!result.is_null()) {
         c.text(24,740,"Result: "+display(result["kind"])+"  Stage: "+display(result["stage"])+"  Reason: "+display(result["reason"]));
-        c.text(24,765,"Result cause: "+display(result["caused_by"])+"  Wide L/R: "+display(result["wide_available"]));
+        c.text(24,765,"Wide available L/R: "+display(result["wide_available"]));
       }
-      c.text(24,790,"State cause: "+display(cal["caused_by"]));
+      if(cal["state"]=="waiting") {
+        const std::string instruction=cal["stage"]=="closed"?"Close your eyes, then select Begin stage.":cal["stage"]=="relaxed"?"Open your eyes naturally, then select Begin stage.":"Widen your eyes and select Begin stage, or select Skip wide.";
+        c.text(24,790,instruction,2,1380,{130,190,255});
+      }
       if(!result.is_null() && result["reason"]=="invalid_interval")c.text(24,820,"Retry natural opening; to redo closed eyes, Cancel and Start again.",2,1380,{255,190,80});
       else c.text(24,820,"Closed eyes -> natural opening -> optional wide opening. Each stage: 2s prepare, 5s measure.");
     }
@@ -228,7 +231,7 @@ std::vector<unsigned char> Ui::render(const Model& m,const std::string& backend)
   }
   c.text(24,950,m.status,2,1380);
   c.text(24,975,error,2,1380,{255,120,120});
-  c.text(24,1000,image_status.empty()?"Apply confirms settings. Calibration replaces the profile only after atomic save.":image_status,2,1380,{255,190,80});
+  c.text(24,1000,image_status.empty()?"Apply confirms settings. Calibration replaces the profile only after successful save.":image_status,2,1380,{255,190,80});
   c.rect(16,height-55,228,45,{110,45,50});c.text(30,height-41,"Close",3);
   c.rect(260,height-55,320,45,{45,65,90});c.text(274,height-41,save?"Save: true":"Save: false",3);
   c.rect(595,height-55,340,45,{40,90,75});c.text(610,height-41,m.pending()?"Pending...":"Apply changes",3);
