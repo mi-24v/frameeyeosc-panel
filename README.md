@@ -2,7 +2,7 @@
 
 Independent Linux C++ OpenVR Dashboard application, version **0.1.0**. It starts
 and owns one `frameeyeosc` backend child. The backend owns settings, OSC and
-persistence; this panel consumes the **IPC v1 implemented subset** over NDJSON.
+persistence; this panel consumes the **IPC v1 settings and calibration contract** over NDJSON.
 There is no Cargo, Rust source tree, or vendor fork build dependency.
 
 ## Build and local checks
@@ -15,7 +15,7 @@ Dependency source/license files stay under `build/_deps`; installed dependency
 licenses are copied to `share/frameeyeosc-panel/licenses`.
 
 ```sh
-cmake -S . -B build -DBUILD_TESTING=ON
+cmake -S . -B build -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Debug
 cmake --build build -j2
 ctest --test-dir build --output-on-failure
 ./build/frameeyeosc-panel --help
@@ -24,8 +24,8 @@ ctest --test-dir build --output-on-failure
 Tests use a fake OpenVR runtime boundary, genuine SDK event enums, and actual
 Unix sockets/owned subprocesses, including parent death, process races, exec
 failure and SIGTERM-to-SIGKILL escalation. They never initialize OpenVR or use
-an HMD. The frozen `tests/fixtures/ipc-v1-subset.jsonl` is copied from the backend
-Task 3 fixture. Comparisons parse JSON; key order and whitespace are irrelevant.
+an HMD. The frozen `tests/fixtures/ipc-v1.jsonl` includes the complete settings schema,
+calibration state/results and applied profiles. Comparisons parse JSON; key order and whitespace are irrelevant.
 
 CMake selects the official `linux64` library on x86_64 and `linuxarm64` on
 AArch64. For a cross build, supply an actual AArch64 compiler/toolchain. An
@@ -85,7 +85,7 @@ line. Invalid JSON/UTF-8, non-finite numbers, duplicate keys, excessive nesting
 and overlong lines
 disconnect. A response timeout is three seconds; reconnect retries are spaced
 by 250 ms. Every reconnect first requests `state.get`. Unconfirmed patches are
-never automatically resent. A `request_limit` response triggers a reconnect and
+never automatically resent; calibration operations are also never replayed. A `request_limit` response triggers a reconnect and
 `state.get`; its unapplied draft requires a manual Apply after synchronization.
 An error response to `state.get` also reconnects and retries `state.get` only,
 with 250 ms reconnect spacing while it fails.
@@ -96,7 +96,11 @@ connection loss. OS/exec/filesystem operations have no hard real-time guarantee.
 
 The dashboard displays each supported field's current, saved and source values:
 cap, prefix, One Euro enable plus all three coefficients, target mode/host/port,
-and ABI `auto`/`4`/`5`. It separately shows tracking, stream state/observed peer,
+and ABI `auto`/`4`/`5` on the Settings tab. The Calibration tab contains
+`eye_widening`, left/right margins, `min_base_width` and `min_wide_width`,
+with the same current/saved/source columns and draft Apply/Save behavior.
+Margins must be finite and nonnegative; minimum widths must be in `(0,1]`.
+The 1440x1080 dashboard uses separate pages to keep all rows and controls visible. It separately shows tracking, stream state/observed peer,
 actual OSC target, output state/reason and backend stopped reason. A stream peer
 is not inferred to be the OSC target; sending does not guarantee UDP reception.
 
@@ -137,6 +141,33 @@ runtime remains unverified. The separate thumbnail is 256x128 RGBA.
 No OpenGL/UI framework is required. Calibration is
 shown as **Calibration unavailable in this build**. No calibration buttons,
 profiles, widening/margin controls or numeric calibration defaults are supplied.
+
+## Manual calibration
+
+Open the Calibration tab and click **Start**. Each waiting stage is started
+explicitly with **Begin stage**: closed eyes, natural opening, then optional
+wide opening. Preparing lasts two seconds and measuring lasts five seconds;
+the dashboard shows the backend's stage, state and remaining milliseconds.
+No next stage starts automatically. At the wide waiting stage, **Skip wide**
+finishes with the newly measured base profile. **Cancel** is available during
+waiting, preparing and measuring, including while an operation response is
+pending. A queued Cancel runs after that response using its actual session;
+a rejected Start does not cancel a previous terminal session.
+
+The applied left/right measurements, natural maximum, derived `d` and
+`wide_start`, wide availability and unavailable reason are shown independently
+from the candidate calibration. State/results retain their `caused_by` IDs.
+A stage failure returns to the same waiting stage for manual retry. For an
+invalid natural interval, retry natural opening; to remeasure closed eyes,
+Cancel and Start again. Saving failure shows `failed`/`save_failed` and retains
+the old applied profile. Acceptance of Start or Begin is not completion; the
+backend replaces a profile only after its final atomic save. Calibration
+persistence is automatic and independent of the settings Save toggle.
+
+On IPC loss, settings edits and calibration actions remain disabled until a
+fresh `state.get` snapshot arrives. The initiating connection's loss causes
+the backend to cancel an active session; reconnect shows its actual terminal
+state and never restarts measurement. Close continues to stop the owned backend.
 
 ## Install and manual manifest registration
 
