@@ -235,6 +235,8 @@ bool Overlay::step(Model& model,const std::string& backend,const std::function<b
       std::cerr<<image.error<<"\n";
     }
   };
+  uint64_t closing_token=0;
+  std::vector<vr::VREvent_t> deferred_clicks;
   auto event=[&](const vr::VREvent_t& e,EventOrigin origin,vr::VROverlayHandle_t queue_handle)->bool {
     const bool own_queue=origin==EventOrigin::OwnedOverlay && (queue_handle==handle_ || queue_handle==thumbnail_);
     if(ends_session(e.eventType,origin,own_queue?handle_:queue_handle,handle_)) {if(e.eventType==vr::VREvent_Quit)runtime_->acknowledge_quit();return false;}
@@ -242,7 +244,7 @@ bool Overlay::step(Model& model,const std::string& backend,const std::function<b
     if(own_queue && e.eventType==vr::VREvent_ImageLoaded) {
       auto& image=queue_handle==handle_?main_image_:thumb_image_;image.failures=0;image.error.clear();
     }
-    if(e.eventType==vr::VREvent_KeyboardDone && !keyboard_key_.empty() && e.data.keyboard.overlayHandle==handle_ && e.data.keyboard.uUserValue==keyboard_token_) {
+    if(e.eventType==vr::VREvent_KeyboardDone && !keyboard_key_.empty() && (e.data.keyboard.overlayHandle==handle_ || (e.data.keyboard.overlayHandle==0 && origin==EventOrigin::OwnedOverlay && queue_handle==handle_)) && e.data.keyboard.uUserValue==keyboard_token_) {
       try{ui.edit(keyboard_key_,runtime_->keyboard_text(),model);}catch(const std::exception& error){ui.error=error.what();}
       keyboard_key_.clear();keyboard_opened_=false;runtime_->hide_keyboard();
     }
@@ -250,9 +252,11 @@ bool Overlay::step(Model& model,const std::string& backend,const std::function<b
     // A close preceding this request's Opened notification belongs to an older keyboard.
     if(e.eventType==vr::VREvent_KeyboardOpened_Global && e.data.keyboard.overlayHandle==handle_ && !keyboard_key_.empty())keyboard_opened_=true;
     if(((e.eventType==vr::VREvent_KeyboardClosed_Global && e.data.keyboard.overlayHandle==handle_) || (e.eventType==vr::VREvent_KeyboardClosed && own_queue && queue_handle==handle_)) && keyboard_opened_) {
-      keyboard_key_.clear();keyboard_opened_=false;
+      // Done can still be waiting in another queue when global Closed arrives.
+      closing_token=keyboard_token_;
     }
     if(e.eventType==vr::VREvent_MouseButtonDown && own_queue && queue_handle==handle_ && e.data.mouse.button==vr::VRMouseButton_Left) {
+      if(closing_token) {deferred_clicks.push_back(e);return true;}
       // SDK mouse origin is bottom-left; the CPU canvas uses top-left.
       const float x=e.data.mouse.x,y=Ui::height-e.data.mouse.y;
       const bool close_hit=std::isfinite(x)&&std::isfinite(y)&&x>=16&&x<244&&y>=Ui::height-55&&y<Ui::height-10;
@@ -279,6 +283,9 @@ bool Overlay::step(Model& model,const std::string& backend,const std::function<b
   for(unsigned i=0;i<64 && runtime_->poll(EventOrigin::System,handle_,e);++i)if(!event(e,EventOrigin::System,0))return false;
   for(unsigned i=0;i<64 && runtime_->poll(EventOrigin::OwnedOverlay,handle_,e);++i)if(!event(e,EventOrigin::OwnedOverlay,handle_))return false;
   for(unsigned i=0;i<64 && runtime_->poll(EventOrigin::OwnedOverlay,thumbnail_,e);++i)if(!event(e,EventOrigin::OwnedOverlay,thumbnail_))return false;
+  if(closing_token==keyboard_token_) {keyboard_key_.clear();keyboard_opened_=false;}
+  closing_token=0;
+  for(const auto& click:deferred_clicks)if(!event(click,EventOrigin::OwnedOverlay,handle_))return false;
   // No optimistic draft clearing: clear only values now confirmed by the backend.
   ui.confirmed(model);
   ui.image_status=main_image_.error;
