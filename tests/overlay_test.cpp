@@ -28,9 +28,71 @@ struct FakeRuntime:OverlayRuntime {
   void emit(uint32_t type,EventOrigin origin=EventOrigin::System){vr::VREvent_t e{};e.eventType=type;(origin==EventOrigin::System?system:overlay).push_back(e);}
   void click(float x,float y){vr::VREvent_t e{};e.eventType=vr::VREvent_MouseButtonDown;e.data.mouse={x,Ui::height-y,vr::VRMouseButton_Left,0};overlay.push_back(e);}
   void done(uint64_t handle=10,uint64_t value=0){vr::VREvent_t e{};e.eventType=vr::VREvent_KeyboardDone;e.data.keyboard.overlayHandle=handle;e.data.keyboard.uUserValue=value?value:token;overlay.push_back(e);}
+  void keyboard_event(std::deque<vr::VREvent_t>& queue,uint32_t type,uint64_t value,uint64_t handle=10){vr::VREvent_t e{};e.eventType=type;e.data.keyboard.overlayHandle=handle;e.data.keyboard.uUserValue=value;queue.push_back(e);}
 };
+void delayed_keyboard_contracts(const Json& response) {
+  bool failed=false;
+  for(const std::string scenario:{"split delivery","poll limit","stale close","missing opened","pending close button","zero-token cancellation","matching-token cancellation","stale opened","bounded clicks","duplicate close deadline"}) {
+    try {
+      FakeRuntime runtime;Model model;model.expect("s1","state.get",Json::object());model.receive(response);
+      Overlay overlay(runtime);overlay.init();auto send=[](const Json&,bool){return false;};
+      runtime.click(30,Ui::rows_top+Ui::row_height+5);CHECK(overlay.step(model,"Backend running",send));
+      runtime.typed="/DelayedDone";
+      if(scenario!="missing opened")runtime.keyboard_event(runtime.system,vr::VREvent_KeyboardOpened_Global,runtime.token);
+      CHECK(overlay.step(model,"Backend running",send));
+      if(scenario=="stale close") {
+        runtime.done(0);CHECK(overlay.step(model,"Backend running",send));
+        runtime.click(30,Ui::rows_top+Ui::row_height+5);CHECK(overlay.step(model,"Backend running",send));
+        runtime.keyboard_event(runtime.system,vr::VREvent_KeyboardOpened_Global,runtime.token);
+        runtime.keyboard_event(runtime.overlay,vr::VREvent_KeyboardClosed_Global,1);
+        runtime.keyboard_event(runtime.thumbnail,vr::VREvent_KeyboardClosed_Global,1);
+        CHECK(overlay.step(model,"Backend running",send));
+        std::this_thread::sleep_for(std::chrono::milliseconds(270));
+        CHECK(overlay.step(model,"Backend running",send));
+        runtime.typed="/FreshDone";runtime.done(0);CHECK(overlay.step(model,"Backend running",send));CHECK(overlay.ui.patch(model)["prefix"]=="/FreshDone");
+      } else if(scenario=="stale opened") {
+        // A stale Opened must not enable the zero-token cancellation fallback.
+        runtime.done(0);CHECK(overlay.step(model,"Backend running",send));
+        runtime.click(30,Ui::rows_top+Ui::row_height+5);CHECK(overlay.step(model,"Backend running",send));
+        runtime.keyboard_event(runtime.system,vr::VREvent_KeyboardOpened_Global,1);
+        runtime.keyboard_event(runtime.system,vr::VREvent_KeyboardClosed_Global,0);
+        CHECK(overlay.step(model,"Backend running",send));std::this_thread::sleep_for(std::chrono::milliseconds(270));CHECK(overlay.step(model,"Backend running",send));
+        runtime.typed="/FreshOpened";runtime.done(0);CHECK(overlay.step(model,"Backend running",send));CHECK(overlay.ui.patch(model)["prefix"]=="/FreshOpened");
+      } else {
+        runtime.keyboard_event(runtime.system,vr::VREvent_KeyboardClosed_Global,scenario=="zero-token cancellation"?0:runtime.token);
+        if(scenario=="poll limit")for(unsigned i=0;i<65;++i)runtime.emit(vr::VREvent_MouseMove,EventOrigin::OwnedOverlay);
+        if(scenario=="poll limit")runtime.done(0);
+        if(scenario=="pending close button")runtime.click(30,Ui::height-20);
+        if(scenario=="pending close button") {CHECK(!overlay.step(model,"Backend running",send));CHECK(overlay.ui.patch(model).empty());continue;}
+        if(scenario=="bounded clicks")for(unsigned i=0;i<161;++i)runtime.click(300,Ui::height-20);
+        CHECK(overlay.step(model,"Backend running",send));CHECK(overlay.ui.patch(model).empty());
+        if(scenario=="bounded clicks") {
+          // Only the first 64 clicks survive; 161 unbounded toggles would leave Save on.
+          CHECK(overlay.step(model,"Backend running",send));CHECK(overlay.step(model,"Backend running",send));CHECK(!overlay.ui.save);
+          std::this_thread::sleep_for(std::chrono::milliseconds(270));CHECK(overlay.step(model,"Backend running",send));CHECK(!overlay.ui.save);
+          runtime.click(30,Ui::rows_top+5);CHECK(overlay.step(model,"Backend running",send));CHECK(runtime.token==2);continue;
+        }
+        if(scenario=="split delivery" || scenario=="poll limit") {
+          if(scenario=="split delivery")runtime.done(0);
+          CHECK(overlay.step(model,"Backend running",send));CHECK(overlay.ui.patch(model)["prefix"]=="/DelayedDone");
+        } else {
+          // Cancelled keyboards recover after a bounded grace period, without Done.
+          runtime.click(30,Ui::rows_top+5);CHECK(overlay.step(model,"Backend running",send));CHECK(runtime.token==1);
+          if(scenario=="duplicate close deadline") {
+            // Duplicate notifications must not extend the cancellation grace period.
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));runtime.keyboard_event(runtime.system,vr::VREvent_KeyboardClosed_Global,runtime.token);CHECK(overlay.step(model,"Backend running",send));
+            std::this_thread::sleep_for(std::chrono::milliseconds(80));
+          } else std::this_thread::sleep_for(std::chrono::milliseconds(270));
+          CHECK(overlay.step(model,"Backend running",send));CHECK(runtime.token==2);CHECK(overlay.ui.patch(model).empty());CHECK(runtime.initial=="1.0");
+        }
+      }
+    } catch(const std::exception& error) {failed=true;std::cerr<<"keyboard scenario "<<scenario<<": "<<error.what()<<"\n";}
+  }
+  CHECK(!failed);
+}
 int main(){try{
   std::ifstream f(FIXTURE_PATH);std::string line;std::getline(f,line);std::getline(f,line);auto response=Json::parse(line);
+  delayed_keyboard_contracts(response);
   Model model;model.expect("s1","state.get",Json::object());model.receive(response);
   FakeRuntime fake;Json submitted;bool submitted_save=false;
   auto send=[&](const Json& patch,bool save){submitted=patch;submitted_save=save;model.expect("p","settings.patch",Json{{"patch",patch},{"save",save}});return true;};
@@ -72,9 +134,8 @@ int main(){try{
     vr::VREvent_t stale_close{};stale_close.eventType=vr::VREvent_KeyboardClosed_Global;stale_close.data.keyboard.overlayHandle=10;stale_close.data.keyboard.uUserValue=old_token;keyboard_runtime.system.push_front(stale_close);
     keyboard_runtime.typed="/Second";keyboard_runtime.done();CHECK(overlay.step(keyboard_model,"Backend running",send));CHECK(overlay.ui.patch(keyboard_model)["prefix"]=="/Second");
   }
-  FakeRuntime cancelled;Model cancel_model;cancel_model.expect("s1","state.get",Json::object());cancel_model.receive(response);
   // SteamVR sends global Closed before main-overlay Done, whose handle is zero.
-  FakeRuntime completed;Model completed_model=cancel_model;
+  FakeRuntime completed;Model completed_model;completed_model.expect("s1","state.get",Json::object());completed_model.receive(response);
   {Overlay overlay(completed);overlay.init();
     completed.click(30,Ui::rows_top+Ui::row_height+5);CHECK(overlay.step(completed_model,"Backend running",send));
     vr::VREvent_t opened{};opened.eventType=vr::VREvent_KeyboardOpened_Global;opened.data.keyboard.overlayHandle=10;completed.system.push_back(opened);
@@ -90,11 +151,13 @@ int main(){try{
     auto revision=overlay.ui.revision();CHECK(overlay.step(completed_model,"Backend running",send));CHECK(overlay.ui.revision()==revision);CHECK(completed.hides==1);
     completed.click(650,Ui::height-20);Json applied;CHECK(overlay.step(completed_model,"Backend running",[&](const Json& patch,bool){applied=patch;return true;}));CHECK((applied==Json{{"prefix","/HardwareDone"}}));
   }
+  FakeRuntime cancelled;Model cancel_model;cancel_model.expect("s1","state.get",Json::object());cancel_model.receive(response);
   {Overlay overlay(cancelled);overlay.init();
     cancelled.click(30,Ui::rows_top+5);CHECK(overlay.step(cancel_model,"Backend running",send));
     vr::VREvent_t opened{};opened.eventType=vr::VREvent_KeyboardOpened_Global;opened.data.keyboard.overlayHandle=10;cancelled.system.push_back(opened);
     vr::VREvent_t closed{};closed.eventType=vr::VREvent_KeyboardClosed_Global;closed.data.keyboard.overlayHandle=10;closed.data.keyboard.uUserValue=0;cancelled.system.push_back(closed);
-    cancelled.click(30,Ui::rows_top+Ui::row_height+5);CHECK(overlay.step(cancel_model,"Backend running",send));CHECK(cancelled.initial=="/FT");CHECK(cancelled.token==2);CHECK(overlay.ui.patch(cancel_model).empty());
+    cancelled.click(30,Ui::rows_top+Ui::row_height+5);CHECK(overlay.step(cancel_model,"Backend running",send));CHECK(cancelled.token==1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(270));CHECK(overlay.step(cancel_model,"Backend running",send));CHECK(cancelled.initial=="/FT");CHECK(cancelled.token==2);CHECK(overlay.ui.patch(cancel_model).empty());
     cancelled.typed="/Stale";cancelled.done(0,1);CHECK(overlay.step(cancel_model,"Backend running",send));CHECK(overlay.ui.patch(cancel_model).empty());
     for(const auto& point:std::vector<std::pair<float,float>>{{5,Ui::height-20},{15,Ui::height-20},{244,Ui::height-20},{249,Ui::height-20},{100,Ui::height-10},{100,Ui::height-1}}) {
       cancelled.click(point.first,point.second);CHECK(overlay.step(cancel_model,"Backend running",send));CHECK(cancelled.hides==0);

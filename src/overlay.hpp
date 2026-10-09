@@ -50,6 +50,9 @@ class Overlay {
   ImageState main_image_,thumb_image_;
   uint64_t keyboard_token_=0;
   bool keyboard_opened_=false;
+  uint64_t keyboard_closing_token_=0;
+  std::chrono::steady_clock::time_point keyboard_close_deadline_{};
+  std::vector<vr::VREvent_t> keyboard_deferred_clicks_;
 public:
   Overlay();
   explicit Overlay(OverlayRuntime& runtime):runtime_(&runtime){}

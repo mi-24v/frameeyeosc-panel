@@ -2,6 +2,7 @@
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <stdexcept>
 #include <iostream>
@@ -235,8 +236,6 @@ bool Overlay::step(Model& model,const std::string& backend,const std::function<b
       std::cerr<<image.error<<"\n";
     }
   };
-  uint64_t closing_token=0;
-  std::vector<vr::VREvent_t> deferred_clicks;
   auto event=[&](const vr::VREvent_t& e,EventOrigin origin,vr::VROverlayHandle_t queue_handle)->bool {
     const bool own_queue=origin==EventOrigin::OwnedOverlay && (queue_handle==handle_ || queue_handle==thumbnail_);
     if(ends_session(e.eventType,origin,own_queue?handle_:queue_handle,handle_)) {if(e.eventType==vr::VREvent_Quit)runtime_->acknowledge_quit();return false;}
@@ -248,18 +247,20 @@ bool Overlay::step(Model& model,const std::string& backend,const std::function<b
       try{ui.edit(keyboard_key_,runtime_->keyboard_text(),model);}catch(const std::exception& error){ui.error=error.what();}
       keyboard_key_.clear();keyboard_opened_=false;runtime_->hide_keyboard();
     }
-    // Global open/close notifications guarantee the overlay handle, not a token.
-    // A close preceding this request's Opened notification belongs to an older keyboard.
-    if(e.eventType==vr::VREvent_KeyboardOpened_Global && e.data.keyboard.overlayHandle==handle_ && !keyboard_key_.empty())keyboard_opened_=true;
-    if(((e.eventType==vr::VREvent_KeyboardClosed_Global && e.data.keyboard.overlayHandle==handle_) || (e.eventType==vr::VREvent_KeyboardClosed && own_queue && queue_handle==handle_)) && keyboard_opened_) {
-      // Done can still be waiting in another queue when global Closed arrives.
-      closing_token=keyboard_token_;
+    // Nonzero tokens identify the request. Tokenless closes need a matching Opened.
+    const bool keyboard_event=e.eventType>=vr::VREvent_KeyboardClosed && e.eventType<=vr::VREvent_KeyboardClosed_Global;
+    const bool matching_token=keyboard_event && e.data.keyboard.uUserValue==keyboard_token_;
+    if(e.eventType==vr::VREvent_KeyboardOpened_Global && e.data.keyboard.overlayHandle==handle_ && !keyboard_key_.empty() && (e.data.keyboard.uUserValue==0 || matching_token))keyboard_opened_=true;
+    if(((e.eventType==vr::VREvent_KeyboardClosed_Global && e.data.keyboard.overlayHandle==handle_) || (e.eventType==vr::VREvent_KeyboardClosed && own_queue && queue_handle==handle_)) && !keyboard_key_.empty() && (e.data.keyboard.uUserValue?matching_token:keyboard_opened_) && !keyboard_closing_token_) {
+      // Separate queues can deliver Done in a later step, including beyond the poll limit.
+      keyboard_closing_token_=keyboard_token_;
+      keyboard_close_deadline_=std::chrono::steady_clock::now()+std::chrono::milliseconds(250);
     }
     if(e.eventType==vr::VREvent_MouseButtonDown && own_queue && queue_handle==handle_ && e.data.mouse.button==vr::VRMouseButton_Left) {
-      if(closing_token) {deferred_clicks.push_back(e);return true;}
       // SDK mouse origin is bottom-left; the CPU canvas uses top-left.
       const float x=e.data.mouse.x,y=Ui::height-e.data.mouse.y;
       const bool close_hit=std::isfinite(x)&&std::isfinite(y)&&x>=16&&x<244&&y>=Ui::height-55&&y<Ui::height-10;
+      if(keyboard_closing_token_ && !close_hit) {if(keyboard_deferred_clicks_.size()<64)keyboard_deferred_clicks_.push_back(e);return true;}
       if(!keyboard_key_.empty() && !close_hit)return true;
       const auto action=ui.click(x,y,model);
       if(action=="close") {
@@ -283,9 +284,12 @@ bool Overlay::step(Model& model,const std::string& backend,const std::function<b
   for(unsigned i=0;i<64 && runtime_->poll(EventOrigin::System,handle_,e);++i)if(!event(e,EventOrigin::System,0))return false;
   for(unsigned i=0;i<64 && runtime_->poll(EventOrigin::OwnedOverlay,handle_,e);++i)if(!event(e,EventOrigin::OwnedOverlay,handle_))return false;
   for(unsigned i=0;i<64 && runtime_->poll(EventOrigin::OwnedOverlay,thumbnail_,e);++i)if(!event(e,EventOrigin::OwnedOverlay,thumbnail_))return false;
-  if(closing_token==keyboard_token_) {keyboard_key_.clear();keyboard_opened_=false;}
-  closing_token=0;
-  for(const auto& click:deferred_clicks)if(!event(click,EventOrigin::OwnedOverlay,handle_))return false;
+  if(keyboard_closing_token_ && (keyboard_key_.empty() || std::chrono::steady_clock::now()>=keyboard_close_deadline_)) {
+    if(keyboard_closing_token_==keyboard_token_) {keyboard_key_.clear();keyboard_opened_=false;}
+    keyboard_closing_token_=0;
+    auto clicks=std::move(keyboard_deferred_clicks_);keyboard_deferred_clicks_.clear();
+    for(const auto& click:clicks)if(!event(click,EventOrigin::OwnedOverlay,handle_))return false;
+  }
   // No optimistic draft clearing: clear only values now confirmed by the backend.
   ui.confirmed(model);
   ui.image_status=main_image_.error;
