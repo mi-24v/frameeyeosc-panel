@@ -6,4 +6,4 @@ Exec=/bin/sh -c "exec ~/.local/bin/frameeyeosc-panel-launch"
 Icon=preferences-system
 Terminal=false
 StartupNotify=false
-Categories=Settings;Utility;
+Categories=Settings;
