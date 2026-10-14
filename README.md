@@ -254,3 +254,27 @@ entry under SteamVR startup/overlay settings. To undo registration, call
 `RemoveApplicationManifest(absolute_manifest_path)` and check their results.
 No registration, HMD launch, remote SSH action, push or publish was performed
 as part of the local implementation checks.
+
+## Desktop application menu
+
+`assets/frameeyeosc-panel.desktop` adds FrameEyeOSC Panel to desktop application
+menus, including the Steam Frame dashboard's **Launch program** menu. It requires
+an existing executable launcher at `~/.local/bin/frameeyeosc-panel-launch` that
+sets the target machine's OpenVR environment and uses `exec` to start the
+installed panel with its backend, control socket and config arguments. This
+launcher is managed separately; the desktop entry does not install it.
+
+Install the entry as the user who runs SteamVR:
+
+```sh
+test -x "$HOME/.local/bin/frameeyeosc-panel-launch"
+install -Dm644 assets/frameeyeosc-panel.desktop \
+  "$HOME/.local/share/applications/frameeyeosc-panel.desktop"
+desktop-file-validate "$HOME/.local/share/applications/frameeyeosc-panel.desktop"
+```
+
+Close and reopen the Launch program menu, then select **FrameEyeOSC Panel**.
+This entry launches the VR dashboard panel; it does not create a desktop window
+or enable automatic startup. Stop any separately running backend before launch.
+To remove the menu entry, delete
+`~/.local/share/applications/frameeyeosc-panel.desktop`.

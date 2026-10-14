@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=FrameEyeOSC Panel
+Comment=Open the eye tracking settings and calibration panel
+Exec=/bin/sh -c "exec ~/.local/bin/frameeyeosc-panel-launch"
+Icon=preferences-system
+Terminal=false
+StartupNotify=false
+Categories=Settings;Utility;
